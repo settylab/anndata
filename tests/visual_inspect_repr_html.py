@@ -240,7 +240,7 @@ try:
     from anndata._repr import (
         FormattedEntry,
         FormattedOutput,
-        FormatterContext,  # noqa: TC001
+        FormatterContext,
         SectionFormatter,
         register_formatter,
     )
@@ -317,6 +317,296 @@ except ImportError:
     MuData = None  # type: ignore[assignment,misc]
 
 
+# Check for SpatialData
+try:
+    from spatialdata import SpatialData
+
+    from anndata._repr import (
+        FormattedEntry,
+        FormattedOutput,
+        FormatterContext,  # noqa: TC001
+        HeaderConfig,
+        IndexPreviewConfig,
+        ObjectFormatter,
+        SectionFormatter,
+        register_formatter,
+    )
+    from anndata._repr.html import generate_repr_html
+    from anndata._repr.utils import format_number
+
+    HAS_SPATIALDATA = True
+
+    # Register an ObjectFormatter for SpatialData
+    @register_formatter
+    class SpatialDataObjectFormatter(ObjectFormatter):
+        """
+        ObjectFormatter for SpatialData.
+
+        This demonstrates how packages with completely different structures
+        (no central X, different sections) can still reuse anndata's HTML repr.
+        """
+
+        priority = 100
+
+        def can_format(self, obj) -> bool:
+            return type(obj).__name__ == "SpatialData"
+
+        def get_header_config(self, obj, context: FormatterContext) -> HeaderConfig:
+            badges = []
+            file_path = None
+
+            # Check for backed/zarr storage
+            if obj.is_backed():
+                path = str(obj.path) if obj.path else None
+                badges.append((
+                    "Zarr",
+                    "adata-badge adata-badge-backed",
+                    "Zarr storage",
+                ))
+                file_path = path
+
+            return HeaderConfig(
+                type_name="SpatialData",
+                shape_str=None,  # SpatialData has no central shape
+                badges=badges,
+                file_path=file_path,
+                show_readme=False,  # SpatialData doesn't use README in uns
+            )
+
+        def get_index_preview_config(
+            self, obj, context: FormatterContext
+        ) -> IndexPreviewConfig | None:
+            # Show coordinate systems instead of obs/var names
+            items = []
+            coord_systems = list(obj.coordinate_systems)
+            if coord_systems:
+                preview = ", ".join(coord_systems[:5])
+                if len(coord_systems) > 5:
+                    preview += f", ... ({len(coord_systems)} total)"
+                items.append(("coordinate_systems:", preview))
+            return IndexPreviewConfig(items=items) if items else None
+
+        def get_sections(self, obj) -> list[str]:
+            # SpatialData uses only custom sections
+            return []
+
+        def should_render_x(self, obj) -> bool:
+            return False  # SpatialData has no X
+
+        def get_footer_version(self, obj) -> str | None:
+            try:
+                from importlib.metadata import version
+
+                return f"spatialdata v{version('spatialdata')}"
+            except Exception:  # noqa: BLE001
+                return "spatialdata"
+
+    # Register SectionFormatters for each SpatialData section
+    @register_formatter
+    class ImagesSectionFormatter(SectionFormatter):
+        """SectionFormatter for SpatialData's .images attribute."""
+
+        section_name = "images"
+        priority = 200
+
+        @property
+        def after_section(self) -> str | None:
+            return None  # Show at the beginning
+
+        @property
+        def doc_url(self) -> str:
+            return "https://spatialdata.scverse.org/en/latest/api/SpatialData.html#spatialdata.SpatialData.images"
+
+        @property
+        def tooltip(self) -> str:
+            return "2D/3D image data (xarray.DataArray)"
+
+        def should_show(self, obj) -> bool:
+            return hasattr(obj, "images") and len(obj.images) > 0
+
+        def get_entries(self, obj, context: FormatterContext) -> list[FormattedEntry]:
+            entries = []
+            for name, image in obj.images.items():
+                # Get shape info from DataArray
+                shape_str = " × ".join(str(s) for s in image.shape)
+                dims_str = ", ".join(image.dims)
+                dtype_str = str(image.dtype)
+                output = FormattedOutput(
+                    type_name=f"DataArray[{dims_str}] ({shape_str}) {dtype_str}",
+                    css_class="dtype-ndarray",
+                    tooltip=f"Image: {name}",
+                    is_expandable=False,
+                    is_serializable=True,
+                )
+                entries.append(FormattedEntry(key=name, output=output))
+            return entries
+
+    @register_formatter
+    class LabelsSectionFormatter(SectionFormatter):
+        """SectionFormatter for SpatialData's .labels attribute."""
+
+        section_name = "labels"
+        priority = 190
+
+        @property
+        def after_section(self) -> str | None:
+            return None
+
+        @property
+        def doc_url(self) -> str:
+            return "https://spatialdata.scverse.org/en/latest/api/SpatialData.html#spatialdata.SpatialData.labels"
+
+        @property
+        def tooltip(self) -> str:
+            return "2D/3D label/segmentation data (xarray.DataArray)"
+
+        def should_show(self, obj) -> bool:
+            return hasattr(obj, "labels") and len(obj.labels) > 0
+
+        def get_entries(self, obj, context: FormatterContext) -> list[FormattedEntry]:
+            entries = []
+            for name, label in obj.labels.items():
+                shape_str = " × ".join(str(s) for s in label.shape)
+                dims_str = ", ".join(label.dims)
+                dtype_str = str(label.dtype)
+                output = FormattedOutput(
+                    type_name=f"DataArray[{dims_str}] ({shape_str}) {dtype_str}",
+                    css_class="dtype-ndarray",
+                    tooltip=f"Labels: {name}",
+                    is_expandable=False,
+                    is_serializable=True,
+                )
+                entries.append(FormattedEntry(key=name, output=output))
+            return entries
+
+    @register_formatter
+    class PointsSectionFormatter(SectionFormatter):
+        """SectionFormatter for SpatialData's .points attribute."""
+
+        section_name = "points"
+        priority = 180
+
+        @property
+        def after_section(self) -> str | None:
+            return None
+
+        @property
+        def doc_url(self) -> str:
+            return "https://spatialdata.scverse.org/en/latest/api/SpatialData.html#spatialdata.SpatialData.points"
+
+        @property
+        def tooltip(self) -> str:
+            return "Point cloud data (dask.dataframe.DataFrame)"
+
+        def should_show(self, obj) -> bool:
+            return hasattr(obj, "points") and len(obj.points) > 0
+
+        def get_entries(self, obj, context: FormatterContext) -> list[FormattedEntry]:
+            entries = []
+            for name, pts in obj.points.items():
+                # Dask dataframe - get shape info
+                n_cols = len(pts.columns)
+                output = FormattedOutput(
+                    type_name=f"DataFrame (? × {n_cols})",
+                    css_class="dtype-dataframe",
+                    tooltip=f"Points: {name} (Dask DataFrame, rows computed lazily)",
+                    is_expandable=False,
+                    is_serializable=True,
+                )
+                entries.append(FormattedEntry(key=name, output=output))
+            return entries
+
+    @register_formatter
+    class ShapesSectionFormatter(SectionFormatter):
+        """SectionFormatter for SpatialData's .shapes attribute."""
+
+        section_name = "shapes"
+        priority = 170
+
+        @property
+        def after_section(self) -> str | None:
+            return None
+
+        @property
+        def doc_url(self) -> str:
+            return "https://spatialdata.scverse.org/en/latest/api/SpatialData.html#spatialdata.SpatialData.shapes"
+
+        @property
+        def tooltip(self) -> str:
+            return "Geometric shapes (geopandas.GeoDataFrame)"
+
+        def should_show(self, obj) -> bool:
+            return hasattr(obj, "shapes") and len(obj.shapes) > 0
+
+        def get_entries(self, obj, context: FormatterContext) -> list[FormattedEntry]:
+            entries = []
+            for name, shape in obj.shapes.items():
+                n_rows, n_cols = shape.shape
+                output = FormattedOutput(
+                    type_name=f"GeoDataFrame ({format_number(n_rows)} × {n_cols})",
+                    css_class="dtype-dataframe",
+                    tooltip=f"Shapes: {name}",
+                    is_expandable=False,
+                    is_serializable=True,
+                )
+                entries.append(FormattedEntry(key=name, output=output))
+            return entries
+
+    @register_formatter
+    class TablesSectionFormatter(SectionFormatter):
+        """SectionFormatter for SpatialData's .tables attribute."""
+
+        section_name = "tables"
+        priority = 160
+
+        @property
+        def after_section(self) -> str | None:
+            return None
+
+        @property
+        def doc_url(self) -> str:
+            return "https://spatialdata.scverse.org/en/latest/api/SpatialData.html#spatialdata.SpatialData.tables"
+
+        @property
+        def tooltip(self) -> str:
+            return "Annotation tables (AnnData)"
+
+        def should_show(self, obj) -> bool:
+            return hasattr(obj, "tables") and len(obj.tables) > 0
+
+        def get_entries(self, obj, context: FormatterContext) -> list[FormattedEntry]:
+            entries = []
+            for name, table in obj.tables.items():
+                shape_str = (
+                    f"{format_number(table.n_obs)} × {format_number(table.n_vars)}"
+                )
+                # Generate nested HTML for expandable content
+                can_expand = context.depth < context.max_depth
+                nested_html = None
+                if can_expand:
+                    nested_html = generate_repr_html(
+                        table,
+                        depth=context.depth + 1,
+                        max_depth=context.max_depth,
+                        show_header=True,
+                        show_search=False,
+                    )
+                output = FormattedOutput(
+                    type_name=f"AnnData ({shape_str})",
+                    css_class="dtype-anndata",
+                    tooltip=f"Table: {name}",
+                    html_content=nested_html,
+                    is_expandable=can_expand,
+                    is_serializable=True,
+                )
+                entries.append(FormattedEntry(key=name, output=output))
+            return entries
+
+except ImportError:
+    HAS_SPATIALDATA = False
+    SpatialData = None  # type: ignore[assignment,misc]
+
+
 def create_test_mudata():
     """Create a comprehensive test MuData with multiple modalities."""
     if not HAS_MUDATA:
@@ -386,6 +676,81 @@ def create_test_mudata():
     mdata.uns["processing_date"] = "2024-03-15"
 
     return mdata
+
+
+def create_test_spatialdata():
+    """Create a comprehensive test SpatialData with all element types."""
+    if not HAS_SPATIALDATA:
+        return None
+
+    import dask.array as da
+    import dask.dataframe as dd
+    import geopandas as gpd
+    from shapely.geometry import Point
+    from spatialdata.models import (
+        Image2DModel,
+        Labels2DModel,
+        PointsModel,
+        ShapesModel,
+        TableModel,
+    )
+
+    np.random.seed(42)
+
+    # Create image (3-channel RGB, 100x100)
+    img_data = da.zeros((3, 100, 100), dtype=np.uint8)
+    image = Image2DModel.parse(img_data, c_coords=["r", "g", "b"])
+
+    # Create labels (segmentation mask)
+    labels_data = da.zeros((100, 100), dtype=np.int32)
+    labels = Labels2DModel.parse(labels_data)
+
+    # Create points (transcript locations)
+    n_points = 50
+    points_df = pd.DataFrame({
+        "x": np.random.uniform(0, 100, n_points),
+        "y": np.random.uniform(0, 100, n_points),
+        "gene": np.random.choice(["GAPDH", "ACTB", "CD3E", "MS4A1"], n_points),
+    })
+    points = PointsModel.parse(dd.from_pandas(points_df, npartitions=1))
+
+    # Create shapes (cell boundaries)
+    n_cells = 20
+    circles = gpd.GeoDataFrame({
+        "geometry": [
+            Point(np.random.uniform(10, 90), np.random.uniform(10, 90)).buffer(3)
+            for _ in range(n_cells)
+        ],
+        "cell_id": list(range(n_cells)),
+    })
+    shapes = ShapesModel.parse(circles)
+
+    # Create table (AnnData with cell annotations)
+    table = AnnData(
+        np.random.randn(n_cells, 10),
+        obs=pd.DataFrame({
+            "cell_type": pd.Categorical(
+                ["T cell", "B cell", "Macrophage", "Epithelial"] * 5
+            ),
+            "region": ["cells"] * n_cells,  # Must match region parameter
+            "cell_id": list(range(n_cells)),
+        }),
+        var=pd.DataFrame({"gene_name": [f"marker_{i}" for i in range(10)]}),
+    )
+    table = TableModel.parse(
+        table, region="cells", region_key="region", instance_key="cell_id"
+    )
+
+    # Create SpatialData
+    sdata = SpatialData(
+        images={"tissue_image": image},
+        labels={"cell_segmentation": labels},
+        points={"transcripts": points},
+        shapes={"cells": shapes},
+        tables={"cell_annotations": table},
+    )
+
+    return sdata
 
 
 def create_test_treedata():
@@ -654,7 +1019,7 @@ def strip_script_tags(html: str) -> str:
     return re.sub(r"<script>.*?</script>", "", html, flags=re.DOTALL)
 
 
-def main():  # noqa: PLR0915
+def main():  # noqa: PLR0912, PLR0915
     """Generate visual test HTML file."""
     print("Generating visual test cases...")
 
@@ -1203,6 +1568,31 @@ For more details, see the full documentation.
             ))
     else:
         print("  19. MuData (skipped - mudata not installed)")
+
+    # Test 20: SpatialData (spatial omics data)
+    # This demonstrates how SpatialData can fully customize the repr using ObjectFormatter:
+    # 1. Registering an ObjectFormatter to customize header, index preview, and skip X
+    # 2. Registering SectionFormatters for images, labels, points, shapes, tables
+    if HAS_SPATIALDATA:
+        print("  20. SpatialData (spatial omics data)")
+        from anndata._repr.html import generate_repr_html
+
+        sdata = create_test_spatialdata()
+        if sdata is not None:
+            sections.append((
+                "20. SpatialData (Spatial Omics Data)",
+                generate_repr_html(sdata),
+                "Demonstrates how packages with completely different structures can reuse "
+                "anndata's HTML repr by registering an <code>ObjectFormatter</code>. "
+                "SpatialData has no central X matrix, uses different sections (images, labels, "
+                "points, shapes, tables), and shows coordinate systems instead of obs/var names. "
+                "The <code>ObjectFormatter</code> customizes the header (no shape), index preview "
+                "(coordinate_systems), footer (spatialdata version), and skips X. Each section "
+                "has its own <code>SectionFormatter</code> with documentation links. "
+                "The tables section contains expandable AnnData objects.",
+            ))
+    else:
+        print("  20. SpatialData (skipped - spatialdata not installed)")
 
     # Generate HTML file
     output_path = Path(__file__).parent / "repr_html_visual_test.html"
