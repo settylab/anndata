@@ -11,6 +11,7 @@ This module generates the complete HTML representation by:
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from typing import TYPE_CHECKING
 
@@ -57,7 +58,12 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from anndata import AnnData
-    from anndata._repr.registry import FormattedEntry, FormattedOutput
+    from anndata._repr.registry import (
+        FormattedEntry,
+        FormattedOutput,
+        HeaderConfig,
+        IndexPreviewConfig,
+    )
 
 # Import formatters to register them (side-effect import)
 import anndata._repr.formatters  # noqa: F401
@@ -120,8 +126,68 @@ def _calculate_field_name_width(adata: AnnData, max_width: int) -> int:
     return max(80, min(width_px, max_width))
 
 
+def _get_repr_settings(
+    max_depth: int | None, fold_threshold: int | None, max_items: int | None
+) -> tuple[int, int, int]:
+    """Get repr settings with defaults."""
+    if max_depth is None:
+        max_depth = _get_setting("repr_html_max_depth", default=DEFAULT_MAX_DEPTH)
+    if fold_threshold is None:
+        fold_threshold = _get_setting(
+            "repr_html_fold_threshold", default=DEFAULT_FOLD_THRESHOLD
+        )
+    if max_items is None:
+        max_items = _get_setting("repr_html_max_items", default=DEFAULT_MAX_ITEMS)
+    return max_depth, fold_threshold, max_items
+
+
+def _render_header_part(
+    obj: Any,
+    context: FormatterContext,
+    object_formatter: Any,
+    *,
+    show_search: bool,
+    depth: int,
+    container_id: str,
+) -> str:
+    """Render the header using either ObjectFormatter or default."""
+    if object_formatter is not None:
+        header_config = object_formatter.get_header_config(obj, context)
+        return _render_header_from_config(
+            obj,
+            header_config,
+            show_search=show_search and depth == 0,
+            container_id=container_id,
+        )
+    return _render_header(
+        obj,
+        show_search=show_search and depth == 0,
+        container_id=container_id,
+    )
+
+
+def _render_index_part(
+    obj: Any, context: FormatterContext, object_formatter: Any
+) -> str:
+    """Render the index preview using either ObjectFormatter or default."""
+    if object_formatter is not None:
+        index_config = object_formatter.get_index_preview_config(obj, context)
+        if index_config is not None:
+            return _render_index_preview_from_config(index_config)
+        return ""
+    return _render_index_preview(obj)
+
+
+def _render_footer_part(obj: Any, object_formatter: Any) -> str:
+    """Render the footer using either ObjectFormatter or default."""
+    if object_formatter is not None:
+        custom_version = object_formatter.get_footer_version(obj)
+        return _render_footer(obj, custom_version=custom_version)
+    return _render_footer(obj)
+
+
 def generate_repr_html(
-    adata: AnnData,
+    obj: Any,
     *,
     depth: int = 0,
     max_depth: int | None = None,
@@ -132,14 +198,19 @@ def generate_repr_html(
     _container_id: str | None = None,
 ) -> str:
     """
-    Generate HTML representation for an AnnData object.
+    Generate HTML representation for an AnnData or AnnData-like object.
+
+    This function supports extension packages via ObjectFormatter registration.
+    If an ObjectFormatter is registered for the object type, it controls the
+    header, index preview, sections, and footer. Otherwise, the default
+    AnnData rendering is used.
 
     Parameters
     ----------
-    adata
-        The AnnData object to represent
+    obj
+        The object to represent (AnnData, MuData, SpatialData, etc.)
     depth
-        Current recursion depth (for nested AnnData in .uns)
+        Current recursion depth (for nested objects)
     max_depth
         Maximum recursion depth. Uses settings/default if None.
     fold_threshold
@@ -157,88 +228,118 @@ def generate_repr_html(
     -------
     HTML string
     """
-    # Get settings with defaults
-    if max_depth is None:
-        max_depth = _get_setting("repr_html_max_depth", default=DEFAULT_MAX_DEPTH)
-    if fold_threshold is None:
-        fold_threshold = _get_setting(
-            "repr_html_fold_threshold", default=DEFAULT_FOLD_THRESHOLD
-        )
-    if max_items is None:
-        max_items = _get_setting("repr_html_max_items", default=DEFAULT_MAX_ITEMS)
-
-    # Check if HTML repr is enabled
-    if not _get_setting("repr_html_enabled", default=True):
-        # Fallback to text repr
-        return f"<pre>{escape_html(repr(adata))}</pre>"
-
-    # Check max depth
-    if depth >= max_depth:
-        return _render_max_depth_indicator(adata)
-
-    # Generate unique container ID
-    container_id = _container_id or f"anndata-repr-{uuid.uuid4().hex[:8]}"
-
-    # Create formatter context
-    context = FormatterContext(
-        depth=depth,
-        max_depth=max_depth,
-        adata_ref=adata,
+    max_depth, fold_threshold, max_items = _get_repr_settings(
+        max_depth, fold_threshold, max_items
     )
+
+    # Early returns for special cases
+    if not _get_setting("repr_html_enabled", default=True):
+        return f"<pre>{escape_html(repr(obj))}</pre>"
+    if depth >= max_depth:
+        return _render_max_depth_indicator(obj)
+
+    container_id = _container_id or f"anndata-repr-{uuid.uuid4().hex[:8]}"
+    context = FormatterContext(depth=depth, max_depth=max_depth, adata_ref=obj)
+    object_formatter = formatter_registry.get_object_formatter(obj)
 
     # Build HTML parts
     parts = []
+    is_top_level = depth == 0
 
-    # CSS and JS only at top level
-    if depth == 0:
+    if is_top_level:
         parts.append(get_css())
 
-    # Calculate field name column width based on content
+    # Container setup
     max_field_width = _get_setting(
         "repr_html_max_field_width", default=DEFAULT_MAX_FIELD_WIDTH
     )
-    field_width = _calculate_field_name_width(adata, max_field_width)
-
-    # Get type column width from settings
+    field_width = _calculate_field_name_width_generic(obj, max_field_width)
     type_width = _get_setting("repr_html_type_width", default=DEFAULT_TYPE_WIDTH)
-
-    # Container with computed column widths as CSS variables
     style = f"--anndata-name-col-width: {field_width}px; --anndata-type-col-width: {type_width}px;"
     parts.append(
         f'<div class="anndata-repr" id="{container_id}" data-depth="{depth}" style="{style}">'
     )
 
-    # Header (with search box integrated on the right)
+    # Header
     if show_header:
         parts.append(
-            _render_header(
-                adata, show_search=show_search and depth == 0, container_id=container_id
+            _render_header_part(
+                obj,
+                context,
+                object_formatter,
+                show_search=show_search,
+                depth=depth,
+                container_id=container_id,
             )
         )
 
     # Index preview (only at top level)
-    if depth == 0:
-        parts.append(_render_index_preview(adata))
+    if is_top_level:
+        parts.append(_render_index_part(obj, context, object_formatter))
 
-    # Sections container
+    # Sections
     parts.append('<div class="adata-sections">')
-    parts.append(_render_x_entry(adata, context))
+    if object_formatter is None or object_formatter.should_render_x(obj):
+        parts.append(_render_x_entry(obj, context))
     parts.extend(
-        _render_all_sections(adata, context, fold_threshold, max_items, max_depth)
+        _render_all_sections(obj, context, fold_threshold, max_items, max_depth)
     )
-    parts.append("</div>")  # adata-sections
+    parts.append("</div>")
 
-    # Footer with metadata (only at top level)
-    if depth == 0:
-        parts.append(_render_footer(adata))
-
-    parts.append("</div>")  # anndata-repr
-
-    # JavaScript (only at top level)
-    if depth == 0:
+    # Footer and JS (only at top level)
+    if is_top_level:
+        parts.append(_render_footer_part(obj, object_formatter))
+    parts.append("</div>")
+    if is_top_level:
         parts.append(get_javascript(container_id))
 
     return "\n".join(parts)
+
+
+def _calculate_field_name_width_generic(obj: Any, max_width: int) -> int:
+    """
+    Calculate the optimal field name column width for any object.
+
+    Works with AnnData and extension types by checking for common attributes.
+    """
+    all_names: list[str] = []
+
+    # Collect names from DataFrame columns (obs, var)
+    for attr in ("obs", "var"):
+        df = getattr(obj, attr, None)
+        if df is not None:
+            with contextlib.suppress(Exception):
+                all_names.extend(df.columns.tolist())
+
+    # Mapping sections (both AnnData and extension types)
+    mapping_attrs = (
+        "uns",
+        "obsm",
+        "varm",
+        "layers",
+        "obsp",
+        "varp",  # AnnData
+        "images",
+        "labels",
+        "points",
+        "shapes",
+        "tables",
+        "mod",  # Extensions
+    )
+    for attr in mapping_attrs:
+        mapping = getattr(obj, attr, None)
+        if mapping is not None:
+            with contextlib.suppress(Exception):
+                all_names.extend(mapping.keys())
+
+    if not all_names:
+        return 100  # Minimum default
+
+    # Find longest name and convert to pixels
+    max_len = max(len(name) for name in all_names)
+    width_px = (max_len * CHAR_WIDTH_PX) + 30  # Padding for copy button
+
+    return max(80, min(width_px, max_width))
 
 
 # =============================================================================
@@ -247,7 +348,7 @@ def generate_repr_html(
 
 
 def _render_all_sections(
-    adata: AnnData,
+    obj: Any,
     context: FormatterContext,
     fold_threshold: int,
     max_items: int,
@@ -255,22 +356,42 @@ def _render_all_sections(
 ) -> list[str]:
     """Render all standard and custom sections."""
     parts = []
-    custom_sections_after = _get_custom_sections_by_position(adata)
+    custom_sections_after = _get_custom_sections_by_position(obj)
 
-    for section in SECTION_ORDER:
+    # Check if there's an ObjectFormatter that defines custom sections
+    object_formatter = formatter_registry.get_object_formatter(obj)
+    if object_formatter is not None:
+        # ObjectFormatter controls which sections to render
+        sections_to_render = object_formatter.get_sections(obj)
+        if not sections_to_render:
+            # No standard sections - only render custom sections
+            for section_formatters in custom_sections_after.values():
+                parts.extend(
+                    _render_custom_section(
+                        obj, section_formatter, context, fold_threshold, max_items
+                    )
+                    for section_formatter in section_formatters
+                )
+            return parts
+        # Use the sections specified by the ObjectFormatter
+        section_order = sections_to_render
+    else:
+        section_order = SECTION_ORDER
+
+    for section in section_order:
         if section == "X":
             # X is already rendered, but check for custom sections after X
             if "X" in custom_sections_after:
                 parts.extend(
                     _render_custom_section(
-                        adata, section_formatter, context, fold_threshold, max_items
+                        obj, section_formatter, context, fold_threshold, max_items
                     )
                     for section_formatter in custom_sections_after["X"]
                 )
             continue
         parts.append(
             _render_section(
-                adata,
+                obj,
                 section,
                 context,
                 fold_threshold=fold_threshold,
@@ -283,7 +404,7 @@ def _render_all_sections(
         if section in custom_sections_after:
             parts.extend(
                 _render_custom_section(
-                    adata, section_formatter, context, fold_threshold, max_items
+                    obj, section_formatter, context, fold_threshold, max_items
                 )
                 for section_formatter in custom_sections_after[section]
             )
@@ -292,7 +413,7 @@ def _render_all_sections(
     if None in custom_sections_after:
         parts.extend(
             _render_custom_section(
-                adata, section_formatter, context, fold_threshold, max_items
+                obj, section_formatter, context, fold_threshold, max_items
             )
             for section_formatter in custom_sections_after[None]
         )
@@ -582,23 +703,112 @@ def _render_header(
     return "\n".join(parts)
 
 
-def _render_footer(adata: AnnData) -> str:
+def _render_header_from_config(
+    obj: Any,
+    config: HeaderConfig,
+    *,
+    show_search: bool = False,
+    container_id: str = "",
+) -> str:
+    """Render the header using a HeaderConfig from an ObjectFormatter."""
+    parts = ['<div class="anndata-hdr">']
+
+    # Type name
+    parts.append(f'<span class="adata-type">{escape_html(config.type_name)}</span>')
+
+    # Shape (optional)
+    if config.shape_str:
+        parts.append(
+            f'<span class="adata-shape">{escape_html(config.shape_str)}</span>'
+        )
+
+    # Badges
+    for badge_text, badge_class, badge_tooltip in config.badges:
+        tooltip_attr = f' title="{escape_html(badge_tooltip)}"' if badge_tooltip else ""
+        parts.append(
+            f'<span class="{escape_html(badge_class)}"{tooltip_attr}>'
+            f"{escape_html(badge_text)}</span>"
+        )
+
+    # File path (for backed objects)
+    if config.file_path:
+        path_style = (
+            "font-family:ui-monospace,monospace;font-size:11px;"
+            "color:var(--anndata-text-secondary, #6c757d);"
+        )
+        parts.append(
+            f'<span class="adata-file-path" style="{path_style}">'
+            f"{escape_html(config.file_path)}"
+            f"</span>"
+        )
+
+    # README icon if enabled and uns["README"] exists
+    if config.show_readme:
+        readme_content = None
+        if hasattr(obj, "uns"):
+            with contextlib.suppress(Exception):
+                readme_content = obj.uns.get("README")
+        if isinstance(readme_content, str) and readme_content.strip():
+            escaped_readme = escape_html(readme_content)
+            tooltip_text = readme_content[:500]
+            if len(readme_content) > 500:
+                tooltip_text += "..."
+            escaped_tooltip = escape_html(tooltip_text)
+            parts.append(
+                f'<span class="adata-readme-icon" '
+                f'data-readme="{escaped_readme}" '
+                f'title="{escaped_tooltip}" '
+                f'role="button" tabindex="0" aria-label="View README">'
+                f"ⓘ"
+                f"</span>"
+            )
+
+    # Search box on the right
+    if show_search:
+        parts.append('<span style="flex-grow:1;"></span>')
+        search_id = f"{container_id}-search" if container_id else "anndata-search"
+        parts.append(
+            f'<input type="text" id="{search_id}" name="{search_id}" class="adata-search-input" style="{STYLE_HIDDEN}" '
+            f'placeholder="Search..." aria-label="Search fields">'
+        )
+        parts.append('<span class="adata-filter-indicator"></span>')
+
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _render_footer(obj: Any, *, custom_version: str | None = None) -> str:
     """Render the footer with version and memory info."""
     parts = ['<div class="anndata-ftr">']
 
-    # Version
-    version = get_anndata_version()
-    parts.append(f"<span>anndata v{version}</span>")
+    # Version (custom or anndata)
+    if custom_version:
+        parts.append(f"<span>{escape_html(custom_version)}</span>")
+    else:
+        version = get_anndata_version()
+        parts.append(f"<span>anndata v{version}</span>")
 
     # Memory usage
     try:
-        mem_bytes = adata.__sizeof__()
+        mem_bytes = obj.__sizeof__()
         mem_str = format_memory_size(mem_bytes)
         parts.append(f'<span title="Estimated memory usage">~{mem_str}</span>')
     except Exception:  # noqa: BLE001
         # Broad catch: __sizeof__ recursively calls into user data which could raise anything
         pass
 
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _render_index_preview_from_config(config: IndexPreviewConfig) -> str:
+    """Render index preview using an IndexPreviewConfig from an ObjectFormatter."""
+    if not config.items:
+        return ""
+
+    parts = ['<div class="adata-index-preview">']
+    for label, preview_html in config.items:
+        parts.append(f"<div><strong>{escape_html(label)}</strong> {preview_html}</div>")
     parts.append("</div>")
     return "\n".join(parts)
 

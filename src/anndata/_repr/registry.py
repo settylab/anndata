@@ -199,6 +199,144 @@ class TypeFormatter(ABC):
         ...
 
 
+@dataclass
+class HeaderConfig:
+    """
+    Configuration for customizing the header of an object's HTML repr.
+
+    This allows extension packages to customize what's shown in the header,
+    including badges, shape info, and whether to show certain elements.
+    """
+
+    type_name: str
+    """Display name for the type (e.g., 'AnnData', 'SpatialData', 'MuData')"""
+
+    shape_str: str | None = None
+    """Shape string to display (e.g., '100 obs × 50 vars'). None to hide."""
+
+    badges: list[tuple[str, str, str]] = field(default_factory=list)
+    """List of (text, css_class, tooltip) tuples for badges"""
+
+    file_path: str | None = None
+    """File path to display (for backed objects)"""
+
+    show_readme: bool = True
+    """Whether to show README icon if uns['README'] exists"""
+
+
+@dataclass
+class IndexPreviewConfig:
+    """Configuration for index preview section."""
+
+    items: list[tuple[str, str]] = field(default_factory=list)
+    """List of (label, preview_html) tuples to display"""
+
+
+class ObjectFormatter(ABC):
+    """
+    Base class for object-level formatters that customize the entire repr.
+
+    Subclass this when you need to customize everything about how an object
+    is represented, including:
+    - Header (type name, shape, badges)
+    - Index preview (obs_names, var_names, or custom)
+    - Which sections to show (can skip X, add custom sections)
+    - Footer content
+
+    This is ideal for packages like SpatialData that have completely different
+    structures than AnnData but want to reuse the styling and infrastructure.
+
+    Example usage::
+
+        from anndata._repr import (
+            register_formatter,
+            ObjectFormatter,
+            HeaderConfig,
+            IndexPreviewConfig,
+        )
+
+
+        @register_formatter
+        class SpatialDataFormatter(ObjectFormatter):
+            priority = 100
+
+            def can_format(self, obj):
+                return type(obj).__name__ == "SpatialData"
+
+            def get_header_config(self, obj, context):
+                return HeaderConfig(
+                    type_name="SpatialData",
+                    shape_str=None,  # No central shape
+                    badges=[("Backed", "adata-badge-backed", "Zarr storage")]
+                    if obj.is_backed()
+                    else [],
+                )
+
+            def get_index_preview_config(self, obj, context):
+                # SpatialData shows coordinate systems instead of obs/var names
+                cs_preview = ", ".join(obj.coordinate_systems[:5])
+                return IndexPreviewConfig(items=[("coordinate_systems:", cs_preview)])
+
+            def get_sections(self, obj):
+                # Return list of section names to render
+                return ["images", "labels", "points", "shapes", "tables"]
+
+            def should_render_x(self, obj):
+                return False  # SpatialData has no X
+
+    Note: The formatter still uses the CSS, JavaScript, and rendering
+    infrastructure from anndata. Custom sections are rendered using
+    registered SectionFormatters.
+    """
+
+    priority: int = 0
+    """Priority for checking this formatter (higher = checked first)"""
+
+    @abstractmethod
+    def can_format(self, obj: Any) -> bool:
+        """Return True if this formatter handles the given object."""
+        ...
+
+    @abstractmethod
+    def get_header_config(self, obj: Any, context: FormatterContext) -> HeaderConfig:
+        """Get header configuration for this object."""
+        ...
+
+    def get_index_preview_config(
+        self, obj: Any, context: FormatterContext
+    ) -> IndexPreviewConfig | None:
+        """
+        Get index preview configuration.
+
+        Return None to skip the index preview section entirely.
+        """
+        return None
+
+    def get_sections(self, obj: Any) -> list[str]:
+        """
+        Get list of section names to render.
+
+        Return standard section names (obs, var, uns, etc.) and/or custom
+        section names that have registered SectionFormatters.
+
+        Return empty list to only render custom sections (via SectionFormatters
+        that have should_show() return True for this object).
+        """
+        return []
+
+    def should_render_x(self, obj: Any) -> bool:
+        """Whether to render the X entry. Return False for objects without X."""
+        return True
+
+    def get_footer_version(self, obj: Any) -> str | None:
+        """
+        Get version string for footer.
+
+        Return None to use anndata version, or a custom version string.
+        """
+        return None
+
+
 class SectionFormatter(ABC):
     """
     Base class for section-specific formatters.
@@ -338,7 +476,7 @@ class FallbackFormatter(TypeFormatter):
 
 class FormatterRegistry:
     """
-    Registry for type and section formatters.
+    Registry for type, section, and object formatters.
 
     This is the central registry that manages all formatters. It supports:
     - Registering new formatters at runtime
@@ -350,6 +488,7 @@ class FormatterRegistry:
     def __init__(self) -> None:
         self._type_formatters: list[TypeFormatter] = []
         self._section_formatters: dict[str, SectionFormatter] = {}
+        self._object_formatters: list[ObjectFormatter] = []
         self._fallback = FallbackFormatter()
 
     def register_type_formatter(self, formatter: TypeFormatter) -> None:
@@ -366,6 +505,16 @@ class FormatterRegistry:
         """Register a section formatter."""
         self._section_formatters[formatter.section_name] = formatter
 
+    def register_object_formatter(self, formatter: ObjectFormatter) -> None:
+        """
+        Register an object formatter.
+
+        Object formatters are checked in priority order (highest first).
+        """
+        self._object_formatters.append(formatter)
+        # Keep sorted by priority (highest first)
+        self._object_formatters.sort(key=lambda f: -f.priority)
+
     def unregister_type_formatter(self, formatter: TypeFormatter) -> bool:
         """Unregister a type formatter. Returns True if found and removed."""
         try:
@@ -373,6 +522,21 @@ class FormatterRegistry:
             return True
         except ValueError:
             return False
+
+    def get_object_formatter(self, obj: Any) -> ObjectFormatter | None:
+        """
+        Get an object formatter for the given object, or None if none match.
+
+        Tries each registered object formatter in priority order.
+        """
+        for formatter in self._object_formatters:
+            try:
+                if formatter.can_format(obj):
+                    return formatter
+            except Exception:  # noqa: BLE001
+                # Intentional broad catch: formatters shouldn't crash
+                continue
+        return None
 
     def format_value(self, obj: Any, context: FormatterContext) -> FormattedOutput:
         """
@@ -521,8 +685,8 @@ def extract_uns_type_hint(value: Any) -> tuple[str | None, Any]:
 
 
 def register_formatter(
-    formatter: TypeFormatter | SectionFormatter,
-) -> TypeFormatter | SectionFormatter:
+    formatter: TypeFormatter | SectionFormatter | ObjectFormatter,
+) -> TypeFormatter | SectionFormatter | ObjectFormatter:
     """
     Register a formatter with the global registry.
 
@@ -544,8 +708,10 @@ def register_formatter(
         formatter_registry.register_type_formatter(formatter)
     elif isinstance(formatter, SectionFormatter):
         formatter_registry.register_section_formatter(formatter)
+    elif isinstance(formatter, ObjectFormatter):
+        formatter_registry.register_object_formatter(formatter)
     else:
-        msg = f"Expected TypeFormatter or SectionFormatter, got {type(formatter)}"
+        msg = f"Expected TypeFormatter, SectionFormatter, or ObjectFormatter, got {type(formatter)}"
         raise TypeError(msg)
 
     return formatter

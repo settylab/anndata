@@ -143,6 +143,10 @@ from anndata._repr.registry import (  # noqa: E402
     FormatterContext,
     # Type formatter registry
     FormatterRegistry,
+    # Object-level customization
+    HeaderConfig,
+    IndexPreviewConfig,
+    ObjectFormatter,
     SectionFormatter,
     TypeFormatter,
     # Type hint extraction (for tagged data in uns)
@@ -172,6 +176,9 @@ __all__ = [  # noqa: RUF022  # organized by category, not alphabetically
     "register_formatter",
     "SectionFormatter",
     "TypeFormatter",
+    "ObjectFormatter",
+    "HeaderConfig",
+    "IndexPreviewConfig",
     "FormattedOutput",
     "FormattedEntry",
     "FormatterContext",
