@@ -22,11 +22,66 @@ import scipy.sparse as sp
 import anndata as ad
 from anndata import AnnData
 from anndata.extensions import (
+    FormattedEntry,
     FormattedOutput,
     TypeFormatter,
     extract_uns_type_hint,
+    register_anndata_namespace,
     register_formatter,
 )
+
+# =============================================================================
+# Example: Unified accessor + section visualization
+# =============================================================================
+# This demonstrates how to create an accessor that automatically gets a section
+# in the HTML repr by defining a _repr_section_ method.
+
+
+@register_anndata_namespace("spatial_demo")
+class SpatialDemoAccessor:
+    """Demo accessor showing unified accessor + section visualization.
+
+    This accessor provides functionality to store spatial images and
+    automatically displays them in the HTML representation.
+    """
+
+    section_after = "obsm"  # Position section after obsm
+    section_display_name = "spatial"  # Display name in HTML
+    section_tooltip = "Spatial data (images, coordinates)"
+
+    def __init__(self, adata: AnnData):
+        self._adata = adata
+
+    @property
+    def images(self) -> dict:
+        """Get stored spatial images."""
+        return self._adata.uns.get("_spatial_images", {})
+
+    def add_image(self, key: str, image: np.ndarray) -> None:
+        """Add a spatial image."""
+        if "_spatial_images" not in self._adata.uns:
+            self._adata.uns["_spatial_images"] = {}
+        self._adata.uns["_spatial_images"][key] = image
+
+    def _repr_section_(self, context) -> list[FormattedEntry] | None:
+        """Return entries for HTML repr, or None to hide section.
+
+        This method is automatically called by the HTML repr system
+        when this accessor is registered with register_anndata_namespace.
+        """
+        if not self.images:
+            return None
+        return [
+            FormattedEntry(
+                key=k,
+                output=FormattedOutput(
+                    type_name=f"Image {v.shape}",
+                    css_class="dtype-array",
+                ),
+            )
+            for k, v in self.images.items()
+        ]
+
 
 # Check optional dependencies
 try:
@@ -1204,6 +1259,26 @@ For more details, see the full documentation.
             ))
     else:
         print("  19. MuData (skipped - mudata not installed)")
+
+    # Test 20: Unified accessor + section visualization
+    print("  20. Unified accessor + section visualization (spatial_demo)")
+    adata_spatial = AnnData(np.random.randn(50, 20).astype(np.float32))
+    adata_spatial.obs["cluster"] = pd.Categorical(["A", "B", "C"] * 16 + ["A", "B"])
+    adata_spatial.obsm["X_spatial"] = np.random.randn(50, 2).astype(np.float32)
+    # Use the spatial_demo accessor to add images
+    adata_spatial.spatial_demo.add_image("hires", np.zeros((1000, 1000, 3)))
+    adata_spatial.spatial_demo.add_image("lowres", np.zeros((200, 200, 3)))
+    adata_spatial.spatial_demo.add_image("segmentation", np.zeros((1000, 1000)))
+    sections.append((
+        "20. Unified Accessor + Section (spatial_demo)",
+        adata_spatial._repr_html_(),
+        "Demonstrates the unified accessor + section pattern. The <code>@register_anndata_namespace</code> "
+        "decorator registers both the accessor (<code>adata.spatial_demo</code>) AND a section in the HTML repr. "
+        "The accessor class defines <code>_repr_section_(self, context)</code> which returns a list of "
+        "<code>FormattedEntry</code> objects. Optional class attributes: <code>section_after</code> (positioning), "
+        "<code>section_display_name</code>, <code>section_tooltip</code>. This is the recommended pattern "
+        "for external packages (SpatialData, MuData) to add both functionality and visualization.",
+    ))
 
     # Generate HTML file
     output_path = Path(__file__).parent / "repr_html_visual_test.html"

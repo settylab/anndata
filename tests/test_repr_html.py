@@ -2619,6 +2619,97 @@ class TestRegistryAbstractMethods:
             SectionFormatter()
 
 
+class TestUnifiedAccessorSection:
+    """Tests for unified accessor + section visualization via _repr_section_."""
+
+    def test_accessor_with_repr_section_creates_section(self):
+        """Test that accessor with _repr_section_ automatically gets a section."""
+        from anndata.extensions import (
+            FormattedEntry,
+            FormattedOutput,
+            formatter_registry,
+            register_anndata_namespace,
+        )
+
+        # Register accessor with _repr_section_
+        @register_anndata_namespace("unified_test")
+        class UnifiedTestAccessor:
+            section_after = "obsm"
+
+            def __init__(self, adata: AnnData):
+                self._adata = adata
+
+            @property
+            def items(self):
+                return self._adata.uns.get("unified_items", {})
+
+            def add_item(self, key, value):
+                if "unified_items" not in self._adata.uns:
+                    self._adata.uns["unified_items"] = {}
+                self._adata.uns["unified_items"][key] = value
+
+            def _repr_section_(self, context):
+                if not self.items:
+                    return None
+                return [
+                    FormattedEntry(
+                        key=k,
+                        output=FormattedOutput(type_name=f"Item: {v}"),
+                    )
+                    for k, v in self.items.items()
+                ]
+
+        try:
+            # Verify section formatter was registered
+            assert "unified_test" in formatter_registry._section_formatters
+
+            # Test that section appears in HTML when items exist
+            adata = AnnData(np.zeros((5, 3)))
+            adata.unified_test.add_item("test_key", "test_value")
+
+            html = adata._repr_html_()
+            assert "unified_test" in html
+            assert "test_key" in html
+            assert "Item: test_value" in html
+
+            # Test that section is hidden when no items
+            adata2 = AnnData(np.zeros((5, 3)))
+            html2 = adata2._repr_html_()
+            assert "unified_test" not in html2
+        finally:
+            # Cleanup: remove the registered accessor and formatter
+            if hasattr(AnnData, "unified_test"):
+                delattr(AnnData, "unified_test")
+            AnnData._accessors.discard("unified_test")
+            formatter_registry._section_formatters.pop("unified_test", None)
+
+    def test_accessor_without_repr_section_no_section(self):
+        """Test that accessor without _repr_section_ doesn't create a section."""
+        from anndata.extensions import formatter_registry, register_anndata_namespace
+
+        # Register accessor WITHOUT _repr_section_
+        @register_anndata_namespace("no_section_test")
+        class NoSectionAccessor:
+            def __init__(self, adata: AnnData):
+                self._adata = adata
+
+            def do_something(self):
+                return "done"
+
+        try:
+            # Verify no section formatter was registered
+            assert "no_section_test" not in formatter_registry._section_formatters
+
+            # Accessor should still work
+            adata = AnnData(np.zeros((5, 3)))
+            assert adata.no_section_test.do_something() == "done"
+        finally:
+            # Cleanup
+            if hasattr(AnnData, "no_section_test"):
+                delattr(AnnData, "no_section_test")
+            AnnData._accessors.discard("no_section_test")
+
+
 class TestCustomHtmlContent:
     """Tests for custom HTML content in Type Formatters."""
 

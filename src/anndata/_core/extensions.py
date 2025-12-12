@@ -10,11 +10,16 @@ from .anndata import AnnData
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from anndata._repr.registry import FormattedEntry, FormatterContext
+
 
 # Based off of the extension framework in Polars
 # https://github.com/pola-rs/polars/blob/main/py-polars/polars/api.py
 
 __all__ = ["register_anndata_namespace"]
+
+# Protocol for accessors that provide section visualization
+REPR_SECTION_METHOD = "_repr_section_"
 
 
 # Reserved namespaces include accessors built into AnnData (currently there are none)
@@ -121,6 +126,76 @@ def _check_namespace_signature(ns_class: type) -> None:
             raise TypeError(msg)
 
 
+def _create_accessor_section_formatter(
+    name: str, ns_class: type[ExtensionNamespace]
+) -> None:
+    """Create and register a SectionFormatter for an accessor with _repr_section_ method.
+
+    This enables unified accessor + visualization registration. When an accessor
+    class defines a `_repr_section_` method, a SectionFormatter is automatically
+    registered that delegates to the accessor instance.
+
+    Parameters
+    ----------
+    name
+        The accessor name (used as section name)
+    ns_class
+        The accessor class that has a _repr_section_ method
+    """
+    from anndata._repr.registry import (
+        FormatterContext,
+        SectionFormatter,
+        register_formatter,
+    )
+
+    # Get optional section configuration from class attributes
+    after_section = getattr(ns_class, "section_after", None)
+    display_name = getattr(ns_class, "section_display_name", name)
+    tooltip = getattr(ns_class, "section_tooltip", "")
+
+    class AccessorSectionFormatter(SectionFormatter):
+        """Auto-generated SectionFormatter that delegates to accessor._repr_section_."""
+
+        @property
+        def section_name(self) -> str:
+            return name
+
+        @property
+        def display_name(self) -> str:
+            return display_name
+
+        @property
+        def after_section(self) -> str | None:
+            return after_section
+
+        @property
+        def tooltip(self) -> str:
+            return tooltip
+
+        def should_show(self, obj: AnnData) -> bool:
+            if not hasattr(obj, name):
+                return False
+            accessor = getattr(obj, name)
+            if not hasattr(accessor, REPR_SECTION_METHOD):
+                return False
+            # Call _repr_section_ to check if it returns entries
+            result = getattr(accessor, REPR_SECTION_METHOD)(FormatterContext())
+            return result is not None and len(result) > 0
+
+        def get_entries(
+            self, obj: AnnData, context: FormatterContext
+        ) -> list[FormattedEntry]:
+            accessor = getattr(obj, name)
+            result = getattr(accessor, REPR_SECTION_METHOD)(context)
+            return result if result is not None else []
+
+    # Give it a meaningful name for debugging
+    AccessorSectionFormatter.__name__ = f"{ns_class.__name__}SectionFormatter"
+    AccessorSectionFormatter.__qualname__ = f"{ns_class.__name__}SectionFormatter"
+
+    register_formatter(AccessorSectionFormatter())
+
+
 def _create_namespace[NameSpT: ExtensionNamespace](
     name: str, cls: type[AnnData]
 ) -> Callable[[type[NameSpT]], type[NameSpT]]:
@@ -138,6 +213,11 @@ def _create_namespace[NameSpT: ExtensionNamespace](
             )
         setattr(cls, name, AccessorNameSpace(name, ns_class))
         cls._accessors.add(name)
+
+        # Auto-register SectionFormatter if accessor has _repr_section_ method
+        if hasattr(ns_class, REPR_SECTION_METHOD):
+            _create_accessor_section_formatter(name, ns_class)
+
         return ns_class
 
     return namespace
@@ -169,12 +249,30 @@ def register_anndata_namespace[NameSpT: ExtensionNamespace](
     -----
     Implementation requirements:
 
-    1. The decorated class must have an `__init__` method that accepts exactly one parameter
+    1. The decorated class must have an `__init__`` method that accepts exactly one parameter
        (besides `self`) named `adata` and annotated with type :class:`~anndata.AnnData`.
     2. The namespace will be initialized with the AnnData object on first access and then
        cached on the instance.
     3. If the namespace name conflicts with an existing namespace, a warning is issued.
     4. If the namespace name conflicts with a built-in AnnData attribute, an AttributeError is raised.
+
+    HTML Representation
+    ~~~~~~~~~~~~~~~~~~~
+    If the accessor class defines a ``_repr_section_`` method, a section will automatically
+    be added to the HTML representation. This enables unified accessor + visualization
+    registration with a single decorator.
+
+    The ``_repr_section_`` method should have the signature::
+
+        def _repr_section_(self, context: FormatterContext) -> list[FormattedEntry] | None:
+            '''Return entries for HTML repr, or None to hide section.'''
+            ...
+
+    Optional class attributes for section configuration:
+
+    - ``section_after``: Section name after which this section appears (e.g., "obsm")
+    - ``section_display_name``: Display name for the section header (defaults to accessor name)
+    - ``section_tooltip``: Tooltip text for the section header
 
     Examples
     --------
@@ -233,5 +331,55 @@ def register_anndata_namespace[NameSpT: ExtensionNamespace](
     >>> adata.transform.arcsinh()  # Transforms X and returns the AnnData object
     AnnData object with n_obs × n_vars = 100 × 2000
         layers: 'log1p', 'arcsinh'
+
+    Accessor with HTML section visualization:
+
+    .. code-block:: python
+
+        from anndata.extensions import (
+            register_anndata_namespace,
+            FormattedEntry,
+            FormattedOutput,
+        )
+
+
+        @register_anndata_namespace("spatial")
+        class SpatialAccessor:
+            # Optional: configure section positioning and display
+            section_after = "obsm"
+            section_display_name = "spatial"
+            section_tooltip = "Spatial data (images, coordinates)"
+
+            def __init__(self, adata: ad.AnnData):
+                self._adata = adata
+
+            @property
+            def images(self):
+                return self._adata.uns.get("spatial_images", {})
+
+            def add_image(self, key, image):
+                if "spatial_images" not in self._adata.uns:
+                    self._adata.uns["spatial_images"] = {}
+                self._adata.uns["spatial_images"][key] = image
+
+            def _repr_section_(self, context) -> list[FormattedEntry] | None:
+                '''Return entries for HTML repr, or None to hide section.'''
+                if not self.images:
+                    return None
+                return [
+                    FormattedEntry(
+                        key=k,
+                        output=FormattedOutput(
+                            type_name=f"Image {v.shape}",
+                            css_class="dtype-array",
+                        ),
+                    )
+                    for k, v in self.images.items()
+                ]
+
+
+        # Usage:
+        adata.spatial.add_image("hires", np.zeros((100, 100, 3)))
+        adata._repr_html_()  # Shows "spatial" section with "hires" entry
     """
     return _create_namespace(name, AnnData)
