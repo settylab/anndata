@@ -689,14 +689,14 @@ class TestFormatterRegistry:
 
     def test_registry_has_formatters(self):
         """Test registry contains registered formatters."""
-        from anndata._repr.registry import formatter_registry
+        from anndata.extensions import formatter_registry
 
         # Should have some formatters registered
         assert len(formatter_registry._type_formatters) > 0
 
     def test_custom_formatter_registration(self):
         """Test registering a custom formatter."""
-        from anndata._repr.registry import (
+        from anndata.extensions import (
             FormattedOutput,
             FormatterContext,
             TypeFormatter,
@@ -739,7 +739,7 @@ class TestFormatterRegistry:
 
     def test_fallback_formatter_for_unknown_types(self):
         """Test fallback formatter handles unknown types gracefully."""
-        from anndata._repr.registry import FormatterContext, formatter_registry
+        from anndata.extensions import FormatterContext, formatter_registry
 
         class UnknownType:
             """An unknown type not in the registry."""
@@ -756,7 +756,7 @@ class TestFormatterRegistry:
 
     def test_formatter_priority_order(self):
         """Test formatters are checked in priority order."""
-        from anndata._repr.registry import formatter_registry
+        from anndata.extensions import formatter_registry
 
         # Verify formatters are sorted by priority (highest first)
         priorities = [f.priority for f in formatter_registry._type_formatters]
@@ -764,7 +764,7 @@ class TestFormatterRegistry:
 
     def test_formatter_sections_filtering(self):
         """Test formatters are only applied to specified sections."""
-        from anndata._repr.registry import (
+        from anndata.extensions import (
             FormattedOutput,
             FormatterContext,
             TypeFormatter,
@@ -808,7 +808,7 @@ class TestFormatterRegistry:
 
     def test_formatter_sections_none_applies_everywhere(self):
         """Test formatters with sections=None apply to all sections."""
-        from anndata._repr.registry import (
+        from anndata.extensions import (
             FormattedOutput,
             FormatterContext,
             TypeFormatter,
@@ -846,7 +846,7 @@ class TestFormatterRegistry:
 
     def test_extension_type_graceful_handling(self):
         """Test extension types (like TreeData, MuData) are handled gracefully."""
-        from anndata._repr.registry import FormatterContext, formatter_registry
+        from anndata.extensions import FormatterContext, formatter_registry
 
         # Simulate an extension type that has AnnData-like attributes
         # We create the class in a way that properly sets __module__
@@ -1704,7 +1704,7 @@ class TestUnsRendererRegistry:
 
     def test_type_formatter_for_tagged_uns_data(self):
         """Test using TypeFormatter to handle tagged data in uns."""
-        from anndata._repr import (
+        from anndata.extensions import (
             FormattedOutput,
             TypeFormatter,
             extract_uns_type_hint,
@@ -1761,7 +1761,7 @@ class TestUnsRendererRegistry:
 
     def test_formatter_error_handled_gracefully(self):
         """Test that TypeFormatter errors don't crash the repr."""
-        from anndata._repr import (
+        from anndata.extensions import (
             TypeFormatter,
             extract_uns_type_hint,
             formatter_registry,
@@ -1815,7 +1815,7 @@ class TestUnsRendererRegistry:
 
     def test_type_hint_key_constant_exported(self):
         """Test that UNS_TYPE_HINT_KEY constant is properly exported."""
-        from anndata._repr import UNS_TYPE_HINT_KEY
+        from anndata.extensions import UNS_TYPE_HINT_KEY
 
         assert UNS_TYPE_HINT_KEY == "__anndata_repr__"
 
@@ -1919,7 +1919,7 @@ class TestSectionFormatterCoverage:
 
     def test_section_formatter_default_methods(self):
         """Test SectionFormatter default method implementations."""
-        from anndata._repr.registry import SectionFormatter
+        from anndata.extensions import SectionFormatter
 
         class TestSectionFormatter(SectionFormatter):
             @property
@@ -2606,14 +2606,14 @@ class TestRegistryAbstractMethods:
 
     def test_type_formatter_is_abstract(self):
         """Verify TypeFormatter cannot be instantiated directly."""
-        from anndata._repr.registry import TypeFormatter
+        from anndata.extensions import TypeFormatter
 
         with pytest.raises(TypeError):
             TypeFormatter()
 
     def test_section_formatter_is_abstract(self):
         """Verify SectionFormatter cannot be instantiated directly."""
-        from anndata._repr.registry import SectionFormatter
+        from anndata.extensions import SectionFormatter
 
         with pytest.raises(TypeError):
             SectionFormatter()
@@ -2624,7 +2624,7 @@ class TestCustomHtmlContent:
 
     def test_inline_html_content(self):
         """Test inline (non-expandable) custom HTML content."""
-        from anndata._repr.registry import (
+        from anndata.extensions import (
             FormattedOutput,
             TypeFormatter,
             formatter_registry,
@@ -2669,7 +2669,7 @@ class TestCustomHtmlContent:
 
     def test_expandable_html_content(self):
         """Test expandable custom HTML content (e.g., for TreeData visualization)."""
-        from anndata._repr.registry import (
+        from anndata.extensions import (
             FormattedOutput,
             TypeFormatter,
             formatter_registry,

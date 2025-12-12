@@ -21,7 +21,7 @@ import scipy.sparse as sp
 
 import anndata as ad
 from anndata import AnnData
-from anndata._repr import (
+from anndata.extensions import (
     FormattedOutput,
     TypeFormatter,
     extract_uns_type_hint,
@@ -40,7 +40,7 @@ try:
     import networkx as nx
     from treedata import TreeData
 
-    from anndata._repr import (
+    from anndata.extensions import (
         FormattedEntry,
         FormattedOutput,
         FormatterContext,
@@ -238,7 +238,7 @@ except (ImportError, AttributeError):
 try:
     from mudata import MuData
 
-    from anndata._repr import (
+    from anndata.extensions import (
         FormattedEntry,
         FormattedOutput,
         FormatterContext,  # noqa: TC001
