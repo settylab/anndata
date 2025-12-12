@@ -2709,6 +2709,53 @@ class TestUnifiedAccessorSection:
                 delattr(AnnData, "no_section_test")
             AnnData._accessors.discard("no_section_test")
 
+    def test_accessor_section_doc_url(self):
+        """Test that section_doc_url is passed through to the SectionFormatter."""
+        from anndata.extensions import (
+            FormattedEntry,
+            FormattedOutput,
+            formatter_registry,
+            register_anndata_namespace,
+        )
+
+        @register_anndata_namespace("docurl_test")
+        class DocUrlTestAccessor:
+            section_after = "obsm"
+            section_display_name = "docurl"
+            section_tooltip = "Test tooltip"
+            section_doc_url = "https://example.com/docs"
+
+            def __init__(self, adata: AnnData):
+                self._adata = adata
+
+            def _repr_section_(self, context):
+                return [
+                    FormattedEntry(
+                        key="item",
+                        output=FormattedOutput(type_name="test"),
+                    )
+                ]
+
+        try:
+            # Verify section formatter was registered with doc_url
+            assert "docurl_test" in formatter_registry._section_formatters
+            section_formatter = formatter_registry._section_formatters["docurl_test"]
+            assert section_formatter.doc_url == "https://example.com/docs"
+            assert section_formatter.display_name == "docurl"
+            assert section_formatter.tooltip == "Test tooltip"
+            assert section_formatter.after_section == "obsm"
+
+            # Test that doc URL appears in HTML
+            adata = AnnData(np.zeros((5, 3)))
+            html = adata._repr_html_()
+            assert "https://example.com/docs" in html
+        finally:
+            # Cleanup
+            if hasattr(AnnData, "docurl_test"):
+                delattr(AnnData, "docurl_test")
+            AnnData._accessors.discard("docurl_test")
+            formatter_registry._section_formatters.pop("docurl_test", None)
+
 
 class TestCustomHtmlContent:
     """Tests for custom HTML content in Type Formatters."""

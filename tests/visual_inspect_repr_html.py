@@ -48,6 +48,7 @@ class SpatialDemoAccessor:
     section_after = "obsm"  # Position section after obsm
     section_display_name = "spatial"  # Display name in HTML
     section_tooltip = "Spatial data (images, coordinates)"
+    section_doc_url = "https://spatialdata.scverse.org/"  # Documentation link
 
     def __init__(self, adata: AnnData):
         self._adata = adata

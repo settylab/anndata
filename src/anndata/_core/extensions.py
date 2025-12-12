@@ -152,6 +152,7 @@ def _create_accessor_section_formatter(
     after_section = getattr(ns_class, "section_after", None)
     display_name = getattr(ns_class, "section_display_name", name)
     tooltip = getattr(ns_class, "section_tooltip", "")
+    doc_url = getattr(ns_class, "section_doc_url", None)
 
     class AccessorSectionFormatter(SectionFormatter):
         """Auto-generated SectionFormatter that delegates to accessor._repr_section_."""
@@ -171,6 +172,10 @@ def _create_accessor_section_formatter(
         @property
         def tooltip(self) -> str:
             return tooltip
+
+        @property
+        def doc_url(self) -> str | None:
+            return doc_url
 
         def should_show(self, obj: AnnData) -> bool:
             if not hasattr(obj, name):
@@ -273,6 +278,7 @@ def register_anndata_namespace[NameSpT: ExtensionNamespace](
     - ``section_after``: Section name after which this section appears (e.g., "obsm")
     - ``section_display_name``: Display name for the section header (defaults to accessor name)
     - ``section_tooltip``: Tooltip text for the section header
+    - ``section_doc_url``: URL to documentation (shown as link icon in header)
 
     Examples
     --------
@@ -349,6 +355,7 @@ def register_anndata_namespace[NameSpT: ExtensionNamespace](
             section_after = "obsm"
             section_display_name = "spatial"
             section_tooltip = "Spatial data (images, coordinates)"
+            section_doc_url = "https://spatialdata.readthedocs.io/"
 
             def __init__(self, adata: ad.AnnData):
                 self._adata = adata
