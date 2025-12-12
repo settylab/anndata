@@ -36,7 +36,11 @@ The system is designed to be extensible via two registry patterns:
 
     Example - format by Python type::
 
-        from anndata.extensions import register_formatter, TypeFormatter, FormattedOutput
+        from anndata.extensions import (
+            register_formatter,
+            TypeFormatter,
+            FormattedOutput,
+        )
 
 
         @register_formatter

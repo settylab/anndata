@@ -13,6 +13,7 @@ Register a custom accessor namespace::
     import anndata as ad
     from anndata.extensions import register_anndata_namespace
 
+
     @register_anndata_namespace("transform")
     class TransformAccessor:
         def __init__(self, adata: ad.AnnData):
@@ -20,14 +21,17 @@ Register a custom accessor namespace::
 
         def log1p(self):
             import numpy as np
+
             self._adata.X = np.log1p(self._adata.X)
             return self._adata
+
 
     # Usage: adata.transform.log1p()
 
 Register a custom HTML formatter for a type::
 
     from anndata.extensions import register_formatter, TypeFormatter, FormattedOutput
+
 
     @register_formatter
     class MyArrayFormatter(TypeFormatter):
@@ -46,6 +50,7 @@ Register a custom section formatter (for packages like TreeData, SpatialData)::
 
     from anndata.extensions import register_formatter, SectionFormatter
     from anndata.extensions import FormattedEntry, FormattedOutput
+
 
     @register_formatter
     class ObstSectionFormatter(SectionFormatter):
@@ -76,6 +81,8 @@ from anndata._core.extensions import register_anndata_namespace
 
 # HTML representation formatters
 from anndata._repr import (
+    # Type hint utilities for tagged data
+    UNS_TYPE_HINT_KEY,
     # Core formatter classes
     FormattedEntry,
     FormattedOutput,
@@ -83,16 +90,14 @@ from anndata._repr import (
     FormatterRegistry,
     SectionFormatter,
     TypeFormatter,
-    # Registration function
-    register_formatter,
+    extract_uns_type_hint,
     # Global registry instance
     formatter_registry,
-    # Type hint utilities for tagged data
-    UNS_TYPE_HINT_KEY,
-    extract_uns_type_hint,
+    # Registration function
+    register_formatter,
 )
 
-__all__ = [
+__all__ = [  # noqa: RUF022  # organized by category, not alphabetically
     # Accessor registration
     "register_anndata_namespace",
     # HTML formatter registration

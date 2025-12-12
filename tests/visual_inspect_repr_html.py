@@ -238,6 +238,8 @@ except (ImportError, AttributeError):
 try:
     from mudata import MuData
 
+    from anndata._repr.html import generate_repr_html
+    from anndata._repr.utils import format_number
     from anndata.extensions import (
         FormattedEntry,
         FormattedOutput,
@@ -245,8 +247,6 @@ try:
         SectionFormatter,
         register_formatter,
     )
-    from anndata._repr.html import generate_repr_html
-    from anndata._repr.utils import format_number
 
     HAS_MUDATA = True
 
