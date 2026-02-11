@@ -2111,8 +2111,8 @@ For questions about this dataset: `genome-lab@example-hospital.org`
         "17. README Icon",
         adata_readme._repr_html_(),
         "When <code>uns['README']</code> contains a string, a small ⓘ icon appears in the header. "
-        "Click the icon to open a modal with the README content displayed as plain text "
-        "(raw markdown source, not rendered). Press Escape or click outside to close.",
+        "Click the icon to open a modal with rendered markdown (if markdown-it-py or mistune "
+        "is installed) or plain text as fallback. Press Escape or click outside to close.",
     ))
 
     # Test 18: README icon in No-JS mode
@@ -2915,7 +2915,7 @@ Size bomb below (50KB):
         "</ul>"
         "<b>Evil README (click icon to open modal):</b><br>"
         "<ul>"
-        "<li>README is displayed as plain text via textContent, so no vectors can fire</li>"
+        "<li>README is rendered as markdown (if renderer available) with raw HTML escaped</li>"
         "<li>Contains: script tags, event handlers, style injection, closing tags</li>"
         "<li>Unicode: RTL override, null bytes, emoji</li>"
         "<li>Template injection attempts, 50KB size bomb</li>"

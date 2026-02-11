@@ -74,6 +74,7 @@ from .utils import (
     get_setting,
     is_backed,
     is_view,
+    render_markdown,
 )
 
 if TYPE_CHECKING:
@@ -466,7 +467,7 @@ def _render_custom_section(
     )
 
 
-def _render_header(
+def _render_header(  # noqa: PLR0912, PLR0915
     adata: AnnData, *, show_search: bool = False, container_id: str = ""
 ) -> str:
     """Render the header with type, shape, badges, and optional search box."""
@@ -537,8 +538,16 @@ def _render_header(
             )
             readme_content += truncation_note
 
-        escaped_readme = escape_html(readme_content)
-        # Truncate for no-JS tooltip (first 500 chars)
+        # Try rendering markdown; fall back to plain text
+        rendered_html = render_markdown(readme_content)
+        if rendered_html is not None:
+            escaped_readme = escape_html(rendered_html)
+            readme_format = "html"
+        else:
+            escaped_readme = escape_html(readme_content)
+            readme_format = "text"
+
+        # Truncate for no-JS tooltip (first 500 chars of source text)
         tooltip_text = readme_content[:TOOLTIP_TRUNCATE_LENGTH]
         if len(readme_content) > TOOLTIP_TRUNCATE_LENGTH:
             tooltip_text += "..."
@@ -547,6 +556,7 @@ def _render_header(
         parts.append(
             f'<span class="anndata-readme__icon" '
             f'data-readme="{escaped_readme}" '
+            f'data-readme-format="{readme_format}" '
             f'title="{escaped_tooltip}" '
             f'role="button" tabindex="0" aria-label="View README">'
             f"ⓘ"

@@ -281,13 +281,120 @@
         line-height: 1.6;
         color: var(--anndata-text-primary);
 
+        h1,
+        h2,
+        h3,
+        h4 {
+            margin-top: 16px;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--anndata-text-primary);
+        }
+
+        h1 {
+            font-size: 1.5em;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--anndata-border-color);
+        }
+
+        h2 {
+            font-size: 1.3em;
+        }
+
+        h3 {
+            font-size: 1.1em;
+        }
+
+        p {
+            margin: 0 0 12px 0;
+        }
+
+        code {
+            background: var(--anndata-code-bg);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: var(--anndata-font-mono);
+            font-size: 0.9em;
+        }
+
         pre {
-            margin: 0;
-            white-space: pre-wrap;
-            word-wrap: break-word;
+            background: var(--anndata-code-bg);
+            padding: 12px;
+            border-radius: var(--anndata-radius);
+            overflow-x: auto;
+            margin: 12px 0;
             font-family: var(--anndata-font-mono);
             font-size: 0.9em;
             line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+
+            code {
+                background: none;
+                padding: 0;
+            }
+        }
+
+        ul,
+        ol {
+            margin: 0 0 12px 24px;
+            padding-left: 0;
+            list-style-position: outside;
+        }
+
+        li {
+            margin: 4px 0;
+            padding-left: 4px;
+        }
+
+        a {
+            color: var(--anndata-link-color);
+            text-decoration: none;
+
+            &:hover {
+                text-decoration: underline;
+            }
+        }
+
+        blockquote {
+            margin: 12px 0;
+            padding: 8px 16px;
+            border-left: 3px solid var(--anndata-accent-color);
+            background: var(--anndata-bg-secondary);
+            color: var(--anndata-text-secondary);
+        }
+
+        table {
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: 0.9em;
+            width: auto;
+        }
+
+        th,
+        td {
+            border: 1px solid var(--anndata-border-color);
+            padding: 6px 12px;
+            text-align: left;
+        }
+
+        th {
+            background: var(--anndata-bg-secondary);
+            font-weight: 600;
+        }
+
+        tbody tr:hover {
+            background: var(--anndata-bg-secondary);
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid var(--anndata-border-color);
+            margin: 12px 0;
+        }
+
+        img {
+            max-width: 100%;
         }
     }
 

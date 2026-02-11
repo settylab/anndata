@@ -774,13 +774,16 @@ class TestReadmeIcon:
         v.assert_text_visible("...")
 
     def test_readme_data_attribute_contains_content(self, validate_html):
-        """Test data-readme attribute contains full content."""
+        """Test data-readme attribute contains content and format flag."""
         adata = AnnData(np.zeros((10, 5)))
         adata.uns["README"] = "Test content"
         html = adata._repr_html_()
         v = validate_html(html)
         v.assert_element_exists(".anndata-readme__icon")
-        v.assert_attribute_value(".anndata-readme__icon", "data-readme", "Test content")
+        # Content is either rendered markdown (html) or plain text
+        assert "Test content" in v.html
+        # Format flag must be present
+        assert 'data-readme-format="html"' in v.html or 'data-readme-format="text"' in v.html
 
     def test_readme_icon_accessibility(self, validate_html):
         """Test readme icon has accessibility attributes."""
