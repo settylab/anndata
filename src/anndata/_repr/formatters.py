@@ -84,13 +84,9 @@ def _check_array_has_writer(array: object) -> bool:
     This uses the actual IO registry, making it future-proof: if a writer
     is registered for a new type (e.g., datetime64), this will detect it.
     """
-    try:
-        from .._io.specs.registry import _REGISTRY
+    from .._io.specs.registry import _REGISTRY
 
-        _REGISTRY.get_spec(array)
-        return True
-    except (KeyError, TypeError):
-        return False
+    return _REGISTRY.has_spec(array)
 
 
 def _check_series_backing_array(series: pd.Series) -> tuple[bool, str]:

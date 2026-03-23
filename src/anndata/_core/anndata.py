@@ -1575,11 +1575,7 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
         """
         from anndata._io.specs.registry import _REGISTRY
 
-        writeable_elems = {
-            src_type
-            for (dest_type, src_type, __) in _REGISTRY.write
-            if store_type is None or store_type in dest_type.__module__
-        }
+        writeable_elems = _REGISTRY.get_writeable_types(store_type)
 
         def predicate(
             elem: RWAble,

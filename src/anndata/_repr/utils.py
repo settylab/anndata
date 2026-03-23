@@ -41,14 +41,11 @@ def _check_serializable_single(obj: object) -> tuple[bool, str]:
     if obj is None:
         return True, ""
 
-    # Use the actual IO registry
-    try:
-        from .._io.specs.registry import _REGISTRY
+    # Check the IO write registry
+    from .._io.specs.registry import _REGISTRY
 
-        _REGISTRY.get_spec(obj)
+    if _REGISTRY.has_spec(obj):
         return True, ""
-    except (KeyError, TypeError):
-        pass
 
     # Check for basic Python types that are serializable
     if isinstance(obj, (bool, int, float, str, bytes)):

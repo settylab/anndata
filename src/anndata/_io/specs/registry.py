@@ -18,7 +18,7 @@ from ...utils import warn
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Iterable
-    from typing import Any
+    from typing import Any, Literal
 
     from anndata._types import (
         ReadCallback,
@@ -220,6 +220,31 @@ class IORegistry[RI: (_ReadInternal, _ReadLazyInternal), R: (Read, ReadLazy)]:
             return self.read_partial[(src_type, spec, modifiers)]
         name = "read_partial"
         raise IORegistryError._from_read_parts(name, self.read_partial, src_type, spec)
+
+    def get_writeable_types(
+        self,
+        store_type: Literal["h5", "zarr"] | None = None,
+    ) -> set[type]:
+        """Get the set of source types that have a registered writer.
+
+        Parameters
+        ----------
+        store_type
+            Filter by storage backend. ``None`` means any backend.
+        """
+        return {
+            src_type
+            for (dest_type, src_type, _modifiers) in self.write
+            if store_type is None or store_type in dest_type.__module__
+        }
+
+    def has_spec(self, elem: Any) -> bool:
+        """Check whether *elem*'s type has a registered write spec."""
+        try:
+            self.get_spec(elem)
+            return True
+        except (KeyError, TypeError):
+            return False
 
     def get_spec(self, elem: Any) -> IOSpec:
         if isinstance(elem, DaskArray):

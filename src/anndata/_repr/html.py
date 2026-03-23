@@ -44,6 +44,7 @@ from .components import (
     render_search_box,
 )
 from .core import (
+    render_empty_section,
     render_formatted_entry,
     render_section,
     render_truncation_indicator,
@@ -58,9 +59,8 @@ from .registry import (
 )
 from .sections import (
     _detect_unknown_sections,
-    _render_dataframe_section,
+    _render_entry_row,
     _render_error_entry,
-    _render_mapping_section,
     _render_raw_section,
     _render_unknown_sections,
     _render_uns_section,
@@ -352,56 +352,268 @@ def _render_all_sections(
     adata: AnnData,
     context: FormatterContext,
 ) -> list[str]:
-    """Render all standard and custom sections."""
-    parts: list[str] = []
+    """Render all standard and custom sections using AnnData.reduce().
+
+    Uses ``reduce`` with ``DFS-pre`` order to traverse the AnnData element tree.
+    Standard sections are rendered inside the reduce callback; custom sections
+    and unknown sections are handled separately since ``reduce`` only visits
+    the hardcoded AnnData attributes and has no extension mechanism.
+    """
+    from dataclasses import replace as dc_replace
+
+    from anndata._core.raw import Raw
+    from anndata.acc import (
+        AdRef,
+        GraphAcc,
+        GraphMapAcc,
+        LayerAcc,
+        LayerMapAcc,
+        MapAcc,
+        MetaAcc,
+        MultiAcc,
+        MultiMapAcc,
+        RefAcc,
+    )
+
     custom_sections_after = _get_custom_sections_by_position(adata)
 
-    for section in SECTION_ORDER:
-        parts.append(_render_section(adata, section, context))
+    # ── accumulator type ──────────────────────────────────────────────
+    # Without enter/exit events on reduce, we must carry open-section
+    # state through the accumulator so we can finalize the previous
+    # section when the next one starts (and after reduce returns).
+    #
+    # This 4-tuple is the "pain point" described in the PR discussion:
+    # reduce already knows section boundaries internally (it's the
+    # `for attr_name in [...]` loop), but doesn't surface them to the
+    # callback, so we have to re-derive them here.
+    #
+    # accumulator = (
+    #   finished_sections: list[str],   # completed section HTML strings
+    #   current_rows: list[str] | None, # entry rows being collected
+    #   current_section: str | None,    # section name (for header/metadata)
+    #   current_n_items: int,           # total items in section (for count)
+    # )
 
-        # Render custom sections after this section
-        if section in custom_sections_after:
-            parts.extend(
-                _render_custom_section(adata, section_formatter, context)
-                for section_formatter in custom_sections_after[section]
+    def _section_name_from_acc(ref_acc) -> str:
+        """Derive section name from accessor.
+
+        PAIN POINT: reduce doesn't pass the section name, only the
+        accessor object. We have to repr() it and strip the 'A.' prefix,
+        or isinstance-check to figure out what section we're in.
+        """
+        return repr(ref_acc).replace("A.", "")
+
+    def _is_section_visit(ref_acc) -> bool:
+        """Detect whether this is a section-level (parent) visit.
+
+        PAIN POINT: reduce visits both sections and their children through
+        the same callback. The only way to distinguish them is by
+        isinstance-checking the accessor type hierarchy.
+        """
+        return isinstance(
+            ref_acc,
+            MetaAcc | LayerAcc | LayerMapAcc | MultiMapAcc | GraphMapAcc,
+        ) and not isinstance(ref_acc, AdRef | MultiAcc | GraphAcc)
+
+    def _is_x(ref_acc) -> bool:
+        """Check if this is the X section (LayerAcc with k=None)."""
+        return isinstance(ref_acc, LayerAcc) and ref_acc.k is None
+
+    def _finalize_section(
+        finished: list[str],
+        section_name: str,
+        rows: list[str],
+        n_items: int,
+    ) -> None:
+        """Wrap up collected rows into a complete section HTML string.
+
+        PAIN POINT: this logic must be called in two places:
+        1. Inside the callback, when the next section starts
+        2. After reduce returns, for the last section
+        A proper enter/exit API would eliminate this duplication.
+        """
+        from . import get_section_doc_url
+        from .core import get_section_tooltip
+
+        doc_url = get_section_doc_url(section_name)
+        tooltip = get_section_tooltip(section_name)
+        if section_name == "obs":
+            tooltip = "Observation annotations"
+        elif section_name == "var":
+            tooltip = "Variable annotations"
+
+        if n_items == 0:
+            finished.append(render_empty_section(section_name, doc_url, tooltip))
+        else:
+            count_str = (
+                f"({n_items} columns)"
+                if section_name in ("obs", "var")
+                else None
+            )
+            finished.append(
+                render_section(
+                    section_name,
+                    "\n".join(rows),
+                    n_items=n_items,
+                    doc_url=doc_url,
+                    tooltip=tooltip,
+                    should_collapse=n_items > context.fold_threshold,
+                    count_str=count_str,
+                )
             )
 
-    # Custom sections at end (no specific position)
+        # Insert custom sections after this standard section
+        if section_name in custom_sections_after:
+            finished.extend(
+                _render_custom_section(adata, sf, context)
+                for sf in custom_sections_after[section_name]
+            )
+
+    def _render_via_reduce(elem, *, accumulate, ref_acc):
+        finished, current_rows, current_section, current_n_items = accumulate
+
+        # ── uns (ref_acc=None, dict) ──────────────────────────────────
+        # PAIN POINT: uns and raw are passed with ref_acc=None and are
+        # not descended into by reduce. We must handle them as opaque
+        # blobs and fall back to the dedicated renderers.
+        if ref_acc is None and isinstance(elem, dict):
+            if current_rows is not None:
+                _finalize_section(finished, current_section, current_rows, current_n_items)
+            try:
+                finished.append(_render_uns_section(adata, context))
+            except Exception as e:  # noqa: BLE001
+                finished.append(_render_error_entry("uns", str(e)))
+            if "uns" in custom_sections_after:
+                finished.extend(
+                    _render_custom_section(adata, sf, context)
+                    for sf in custom_sections_after["uns"]
+                )
+            return finished, None, None, 0
+
+        # ── raw (ref_acc=None, Raw or None) ───────────────────────────
+        # Same issue as uns: reduce passes raw as an opaque blob.
+        if ref_acc is None:
+            if isinstance(elem, Raw):
+                try:
+                    finished.append(_render_raw_section(adata, context))
+                except Exception as e:  # noqa: BLE001
+                    finished.append(_render_error_entry("raw", str(e)))
+                if "raw" in custom_sections_after:
+                    finished.extend(
+                        _render_custom_section(adata, sf, context)
+                        for sf in custom_sections_after["raw"]
+                    )
+            # raw is None (no raw data) — nothing to render
+            return finished, None, None, 0
+
+        # ── X section (special rendering) ─────────────────────────────
+        if _is_x(ref_acc):
+            try:
+                finished.append(render_x_entry(adata, context))
+            except Exception as e:  # noqa: BLE001
+                finished.append(_render_error_entry("X", str(e)))
+            if "X" in custom_sections_after:
+                finished.extend(
+                    _render_custom_section(adata, sf, context)
+                    for sf in custom_sections_after["X"]
+                )
+            return finished, None, None, 0
+
+        # ── Section entry (parent visit in DFS-pre) ──────────────────
+        if _is_section_visit(ref_acc):
+            # Finalize previous section if one was open
+            # PAIN POINT: previous section's exit is detected here,
+            # inside the *next* section's entry. Mixed concerns.
+            if current_rows is not None:
+                _finalize_section(finished, current_section, current_rows, current_n_items)
+
+            section_name = _section_name_from_acc(ref_acc)
+            # PAIN POINT: reduce passes the container elem but we need the
+            # *entry count*, which differs by section type:
+            #   DataFrame → len(df.columns), not len(df) (which is n_rows)
+            #   Mapping   → len(mapping) (number of keys)
+            # A dedicated enter event could pass this directly.
+            if isinstance(ref_acc, MetaAcc):
+                import pandas as pd
+                n_items = len(elem.columns) if isinstance(elem, pd.DataFrame) else 0
+            else:
+                try:
+                    n_items = len(elem)
+                except TypeError:
+                    n_items = 0
+            return finished, [], section_name, n_items
+
+        # ── Leaf visit (entry within a section) ──────────────────────
+        # PAIN POINT: we must derive the section name and key from
+        # ref_acc. For MetaAcc children (obs/var columns), the key is
+        # in the AdRef. For mapping children, it's in the RefAcc.
+        if current_rows is not None and current_section is not None:
+            # Determine the entry key
+            if isinstance(ref_acc, AdRef):
+                key = ref_acc.idx
+            elif isinstance(ref_acc, (MultiAcc, GraphAcc, LayerAcc)):
+                key = ref_acc.k
+            else:
+                key = str(ref_acc)
+
+            # Truncation: skip entries beyond max_items
+            entry_index = len(current_rows)
+            if entry_index >= context.max_items:
+                if entry_index == context.max_items:
+                    remaining = current_n_items - context.max_items
+                    current_rows.append(render_truncation_indicator(remaining))
+                return accumulate
+
+            # Format via the registry (same as the dedicated renderers)
+            try:
+                section_context = dc_replace(context, section=current_section)
+                key_context = dc_replace(section_context, key=key)
+                output = formatter_registry.format_value(elem, key_context)
+                append_type = current_section not in ("obs", "var")
+                current_rows.append(
+                    _render_entry_row(str(key), output, append_type_html=append_type)
+                )
+            except Exception as e:  # noqa: BLE001
+                current_rows.append(
+                    f'<div class="anndata-entry--error">Error: {escape_html(str(e))}</div>'
+                )
+
+        return finished, current_rows, current_section, current_n_items
+
+    # ── Run reduce ────────────────────────────────────────────────────
+    try:
+        finished, leftover_rows, last_section, last_n_items = adata.reduce(
+            _render_via_reduce,
+            init=([], None, None, 0),
+            order="DFS-pre",
+        )
+    except Exception as e:  # noqa: BLE001
+        # If reduce itself fails, fall back to an error message
+        return [f'<div class="anndata-entry--error">reduce failed: {escape_html(str(e))}</div>']
+
+    # PAIN POINT: the *last* section never gets a "next section entry"
+    # to trigger finalization. We must duplicate the finalize call here.
+    if leftover_rows is not None and last_section is not None:
+        _finalize_section(finished, last_section, leftover_rows, last_n_items)
+
+    # ── Custom sections at end (no specific position) ─────────────────
+    # LIMITATION: reduce has no concept of custom/unknown sections.
+    # These must be handled entirely outside reduce.
     if None in custom_sections_after:
-        parts.extend(
-            _render_custom_section(adata, section_formatter, context)
-            for section_formatter in custom_sections_after[None]
+        finished.extend(
+            _render_custom_section(adata, sf, context)
+            for sf in custom_sections_after[None]
         )
 
-    # Detect and show unknown sections (mapping-like attributes not in SECTION_ORDER)
+    # ── Unknown sections (extension attributes) ──────────────────────
+    # LIMITATION: reduce hardcodes its attribute list. Extension packages
+    # (TreeData adding .obst/.vart) are invisible to reduce. We must
+    # detect and render them separately, same as before.
     unknown_sections = _detect_unknown_sections(adata)
     if unknown_sections:
-        parts.append(_render_unknown_sections(unknown_sections))
+        finished.append(_render_unknown_sections(unknown_sections))
 
-    return parts
-
-
-def _render_section(
-    adata: AnnData,
-    section: str,
-    context: FormatterContext,
-) -> str:
-    """Render a single standard section."""
-    from .._repr_constants import SECTION_RAW, SECTION_UNS
-
-    try:
-        if section == SECTION_X:
-            return render_x_entry(adata, context)
-        if section == SECTION_RAW:
-            return _render_raw_section(adata, context)
-        if section in (SECTION_OBS, SECTION_VAR):
-            return _render_dataframe_section(adata, section, context)
-        if section == SECTION_UNS:
-            return _render_uns_section(adata, context)
-        return _render_mapping_section(adata, section, context)
-    except Exception as e:  # noqa: BLE001
-        # Show error instead of hiding the section
-        return _render_error_entry(section, str(e))
+    return finished
 
 
 def _get_custom_sections_by_position(
