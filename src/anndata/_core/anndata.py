@@ -4,10 +4,10 @@ Main class and helper functions.
 
 from __future__ import annotations
 
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from collections.abc import Mapping, MutableMapping, Sequence
 from copy import copy, deepcopy
-from functools import partial, singledispatchmethod
+from functools import singledispatchmethod
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING, cast, overload
@@ -18,15 +18,14 @@ import pandas as pd
 from natsort import natsorted
 from numpy import ma
 from pandas.api.types import infer_dtype
-from scipy import sparse
 from scipy.sparse import issparse
 
 from anndata._warnings import ImplicitModificationWarning
+from anndata.acc import A, AdAcc, AdRef, GraphAcc, LayerAcc, MultiAcc
 
 from .. import utils
 from .._settings import settings
 from ..compat import (
-    CSArray,
     DaskArray,
     IndexManager,
     ZarrArray,
@@ -61,10 +60,14 @@ if TYPE_CHECKING:
     from os import PathLike
     from typing import Any, ClassVar, Literal
 
+    from scipy import sparse
     from zarr.storage import StoreLike
 
-    from ..acc import AdRef, Array, MapAcc, RefAcc
-    from ..compat import XDataset
+    from anndata.types import ReduceFunc
+    from anndata.typing import RWAble
+
+    from ..acc import Array, MapAcc, RefAcc
+    from ..compat import CSArray, CSMatrix, XDataset
     from ..typing import Index, Index1D, _Index1DNorm, _XDataType
     from .aligned_mapping import AxisArraysView, LayersView, PairwiseArraysView
 
@@ -513,36 +516,57 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
     def __sizeof__(
         self, *, show_stratified: bool = False, with_disk: bool = False
     ) -> int:
-        def get_size(X) -> int:
-            def cs_to_bytes(X) -> int:
-                return int(X.data.nbytes + X.indptr.nbytes + X.indices.nbytes)
+        def cs_to_bytes(X: CSArray | CSMatrix) -> int:
+            return int(X.data.nbytes + X.indptr.nbytes + X.indices.nbytes)
 
+        def get_size(X: RWAble) -> int:
             if isinstance(X, h5py.Dataset) and with_disk:
                 return int(np.array(X.shape).prod() * X.dtype.itemsize)
             elif isinstance(X, BaseCompressedSparseDataset) and with_disk:
                 return cs_to_bytes(X._to_backed())
             elif issparse(X):
                 return cs_to_bytes(X)
+            elif isinstance(X, dict):
+                return sum(get_size(v) for v in X.values())
             else:
                 return X.__sizeof__()
 
-        sizes = {}
-        attrs = ["X", "_obs", "_var"]
-        attrs_multi = ["_uns", "_obsm", "_varm", "varp", "_obsp", "_layers"]
-        for attr in attrs + attrs_multi:
-            if attr in attrs_multi:
-                keys = getattr(self, attr).keys()
-                s = sum(get_size(getattr(self, attr)[k]) for k in keys)
-            else:
-                s = get_size(getattr(self, attr))
-            if s > 0 and show_stratified:
-                from tqdm import tqdm
+        def fold_size[R: dict[type[RefAcc | MapAcc | AdAcc | Raw] | None, int]](
+            X: RWAble,
+            *,
+            accumulate: R,
+            ref_acc: RefAcc | AdRef | MapAcc | None,
+        ) -> R:
+            if isinstance(X, Raw):
+                ref_acc = X  # type: ignore[assignment]
+                accumulate[Raw] += get_size(X.X)
+                accumulate[Raw] += get_size(X.var)
+                for key in X.varm:
+                    accumulate[Raw] += get_size(X.varm[key])
+            elif ref_acc is None:  # "None but not Raw" is uns
+                accumulate[None] = get_size(self.uns)
+            if is_elem := (
+                # an array of some sort i.e., from AdRef (from obs/var) or a reference to one
+                (is_ad_ref := isinstance(ref_acc, AdRef))
+                or isinstance(ref_acc, LayerAcc | MultiAcc | GraphAcc)
+            ):
+                key = type(ref_acc.acc) if is_ad_ref else ref_acc.parent_type
+                accumulate[key] += get_size(X)
+            # if this is X or a parent elem maybe print it out.
+            if (is_x := ref_acc is A.X) or not is_elem:
+                if ref_acc is not None:
+                    s = accumulate[AdAcc if is_x else type(ref_acc)]  # type: ignore[assignment]
+                else:
+                    s = accumulate[None]
+                if s > 0 and show_stratified:
+                    from tqdm import tqdm
 
-                print(
-                    f"Size of {attr.replace('_', '.'):<7}: {tqdm.format_sizeof(s, 'B')}"
-                )
-            sizes[attr] = s
-        return sum(sizes.values())
+                    print(
+                        f"Size of {repr(ref_acc).replace('A.', '') if ref_acc is not None else 'uns'}: {tqdm.format_sizeof(s, 'B')}"
+                    )
+            return accumulate
+
+        return sum(self.reduce(fold_size, init=defaultdict(int)).values())
 
     def _gen_repr(self, n_obs, n_vars) -> str:
         backed_at = f" backed at {str(self.filename)!r}" if self.isbacked else ""
@@ -1081,21 +1105,6 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
     ) -> tuple[_Index1DNorm | int | np.integer, _Index1DNorm | int | np.integer]:
         return _normalize_indices(index, self.obs_names, self.var_names)
 
-    # TODO: this is not quite complete...
-    def __delitem__(self, index: Index) -> None:
-        obs, var = self._normalize_indices(index)
-        # TODO: does this really work?
-        if not self.isbacked:
-            del self._X[obs, var]
-        else:
-            X = self.file["X"]
-            del X[obs, var]
-            self._set_backed("X", X)
-        if var == slice(None):
-            del self._obs.iloc[obs, :]
-        if obs == slice(None):
-            del self._var.iloc[var, :]
-
     @overload
     def __getitem__(self, index: AdRef) -> Array: ...
     @overload
@@ -1263,19 +1272,6 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
         adata_subset = self[index].copy()
 
         self._init_as_actual(adata_subset)
-
-    # TODO: Update, possibly remove
-    def __setitem__(self, index: Index, val: float | _XDataType):
-        if self.is_view:
-            msg = "Object is view and cannot be accessed with `[]`."
-            raise ValueError(msg)
-        obs, var = self._normalize_indices(index)
-        if not self.isbacked:
-            self._X[obs, var] = val
-        else:
-            X = self.file["X"]
-            X[obs, var] = val
-            self._set_backed("X", X)
 
     def __len__(self) -> int:
         return self.shape[0]
@@ -1504,293 +1500,113 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
             write_h5ad(filename, self)
             return read_h5ad(filename, backed=mode)
 
-    @deprecated(
-        deprecation_msg(
-            *("AnnData.concatenate", "anndata.concat"),
-            "See the tutorial for concat at: "
-            "https://anndata.readthedocs.io/en/latest/concatenation.html",
-        )
-    )
-    def concatenate(
+    def reduce[T](
         self,
-        *adatas: AnnData,
-        join: str = "inner",
-        batch_key: str = "batch",
-        batch_categories: Sequence[Any] | None = None,
-        uns_merge: str | None = None,
-        index_unique: str | None = "-",
-        fill_value=None,
-    ) -> AnnData:
-        """\
-        Concatenate along the observations axis.
+        func: ReduceFunc[T],
+        *,
+        init: T,
+        order: Literal["DFS-pre", "DFS-post"] = "DFS-post",
+    ) -> T:
+        """Accumulate a value starting from init by iterating over the "elems"/leaf nodes of the AnnData object.
 
-        The :attr:`uns`, :attr:`varm` and :attr:`obsm` attributes are ignored.
-
-        Currently, this works only in `'memory'` mode.
-
-        .. note::
-
-            For more flexible and efficient concatenation, see: :func:`~anndata.concat`.
+        All visits inside the user-defined `func` (see :func:`types.ReduceFunc`) are distinguishable via the `ref_acc` + `elem` args.
+        Visits to {attr}`~AnnData.raw` pass `ref_acc is None` and `isinstance(elem, Raw)` to the :func:`types.ReduceFunc`.
+        Visits to {attr}`~AnnData.uns` pass `ref_acc is None` and `isinstance(elem, dict)` to the :func:`types.ReduceFunc`.
+        Furthermore, neither element is descended into.
+        This behavior could change where a new `ref_acc` type will be available, in which case we could start descending in these cases.
+        All other elements will have a non-`None` `ref_acc` argument indicating the path at which `elem` was created in the `AnnData`.
 
         Parameters
         ----------
-        adatas
-            AnnData matrices to concatenate with. Each matrix is referred to as
-            a “batch”.
-        join
-            Use intersection (`'inner'`) or union (`'outer'`) of variables.
-        batch_key
-            Add the batch annotation to :attr:`obs` using this key.
-        batch_categories
-            Use these as categories for the batch annotation. By default, use increasing numbers.
-        uns_merge
-            Strategy to use for merging entries of uns. These strategies are applied recusivley.
-            Currently implemented strategies include:
+        func
+            The function that performs the accumulation.
+        init
+            The starting value
+        order
+            How to visit the items in the reduce.
+            "DFS-pre" indicates that parent-elements like layers, obs, and varp get visited first.
+            "DFS-post" means they get visited afterwards.
+            The `AnnData` itself is not visited.
 
-            * `None`: The default. The concatenated object will just have an empty dict for `uns`.
-            * `"same"`: Only entries which have the same value in all AnnData objects are kept.
-            * `"unique"`: Only entries which have one unique value in all AnnData objects are kept.
-            * `"first"`: The first non-missing value is used.
-            * `"only"`: A value is included if only one of the AnnData objects has a value at this
-              path.
-        index_unique
-            Make the index unique by joining the existing index names with the
-            batch category, using `index_unique='-'`, for instance. Provide
-            `None` to keep existing indices.
-        fill_value
-            Scalar value to fill newly missing values in arrays with. Note: only applies to arrays
-            and sparse matrices (not dataframes) and will only be used if `join="outer"`.
 
-            .. note::
-                If not provided, the default value is `0` for sparse matrices and `np.nan`
-                for numpy arrays. See the examples below for more information.
 
         Returns
         -------
-        :class:`~anndata.AnnData`
-            The concatenated :class:`~anndata.AnnData`, where `adata.obs[batch_key]`
-            stores a categorical variable labeling the batch.
-
-        Notes
-        -----
-
-        .. warning::
-
-           If you use `join='outer'` this fills 0s for sparse data when
-           variables are absent in a batch. Use this with care. Dense data is
-           filled with `NaN`. See the examples.
-
-        Examples
-        --------
-        Joining on intersection of variables.
-
-        >>> adata1 = AnnData(
-        ...     np.array([[1, 2, 3], [4, 5, 6]]),
-        ...     dict(obs_names=['s1', 's2'], anno1=['c1', 'c2']),
-        ...     dict(var_names=['a', 'b', 'c'], annoA=[0, 1, 2]),
-        ... )
-        >>> adata2 = AnnData(
-        ...     np.array([[1, 2, 3], [4, 5, 6]]),
-        ...     dict(obs_names=['s3', 's4'], anno1=['c3', 'c4']),
-        ...     dict(var_names=['d', 'c', 'b'], annoA=[0, 1, 2]),
-        ... )
-        >>> adata3 = AnnData(
-        ...     np.array([[1, 2, 3], [4, 5, 6]]),
-        ...     dict(obs_names=['s1', 's2'], anno2=['d3', 'd4']),
-        ...     dict(var_names=['d', 'c', 'b'], annoA=[0, 2, 3], annoB=[0, 1, 2]),
-        ... )
-        >>> adata = adata1.concatenate(adata2, adata3)
-        >>> adata
-        AnnData object with n_obs × n_vars = 6 × 2
-            obs: 'anno1', 'anno2', 'batch'
-            var: 'annoA-0', 'annoA-1', 'annoA-2', 'annoB-2'
-        >>> adata.X
-        array([[2, 3],
-               [5, 6],
-               [3, 2],
-               [6, 5],
-               [3, 2],
-               [6, 5]])
-        >>> adata.obs
-             anno1 anno2 batch
-        s1-0    c1   NaN     0
-        s2-0    c2   NaN     0
-        s3-1    c3   NaN     1
-        s4-1    c4   NaN     1
-        s1-2   NaN    d3     2
-        s2-2   NaN    d4     2
-        >>> adata.var.T
-                 b  c
-        annoA-0  1  2
-        annoA-1  2  1
-        annoA-2  3  2
-        annoB-2  2  1
-
-        Joining on the union of variables.
-
-        >>> outer = adata1.concatenate(adata2, adata3, join='outer')
-        >>> outer
-        AnnData object with n_obs × n_vars = 6 × 4
-            obs: 'anno1', 'anno2', 'batch'
-            var: 'annoA-0', 'annoA-1', 'annoA-2', 'annoB-2'
-        >>> outer.var.T
-                   a    b    c    d
-        annoA-0  0.0  1.0  2.0  NaN
-        annoA-1  NaN  2.0  1.0  0.0
-        annoA-2  NaN  3.0  2.0  0.0
-        annoB-2  NaN  2.0  1.0  0.0
-        >>> outer.var_names.astype("string")
-        Index(['a', 'b', 'c', 'd'], dtype='string')
-        >>> outer.X
-        array([[ 1.,  2.,  3., nan],
-               [ 4.,  5.,  6., nan],
-               [nan,  3.,  2.,  1.],
-               [nan,  6.,  5.,  4.],
-               [nan,  3.,  2.,  1.],
-               [nan,  6.,  5.,  4.]])
-        >>> outer.X.sum(axis=0)
-        array([nan, 25., 23., nan])
-        >>> import pandas as pd
-        >>> Xdf = pd.DataFrame(outer.X, columns=outer.var_names)
-        >>> Xdf
-             a    b    c    d
-        0  1.0  2.0  3.0  NaN
-        1  4.0  5.0  6.0  NaN
-        2  NaN  3.0  2.0  1.0
-        3  NaN  6.0  5.0  4.0
-        4  NaN  3.0  2.0  1.0
-        5  NaN  6.0  5.0  4.0
-        >>> Xdf.sum()
-        a     5.0
-        b    25.0
-        c    23.0
-        d    10.0
-        dtype: float64
-
-        One way to deal with missing values is to use masked arrays:
-
-        >>> from numpy import ma
-        >>> outer.X = ma.masked_invalid(outer.X)
-        >>> outer.X
-        masked_array(
-          data=[[1.0, 2.0, 3.0, --],
-                [4.0, 5.0, 6.0, --],
-                [--, 3.0, 2.0, 1.0],
-                [--, 6.0, 5.0, 4.0],
-                [--, 3.0, 2.0, 1.0],
-                [--, 6.0, 5.0, 4.0]],
-          mask=[[False, False, False,  True],
-                [False, False, False,  True],
-                [ True, False, False, False],
-                [ True, False, False, False],
-                [ True, False, False, False],
-                [ True, False, False, False]],
-          fill_value=1e+20)
-        >>> outer.X.sum(axis=0).data
-        array([ 5., 25., 23., 10.])
-
-        The masked array is not saved but has to be reinstantiated after saving.
-
-        >>> outer.write('./test.h5ad')
-        >>> from anndata import read_h5ad
-        >>> outer = read_h5ad('./test.h5ad')
-        >>> outer.X
-        array([[ 1.,  2.,  3., nan],
-               [ 4.,  5.,  6., nan],
-               [nan,  3.,  2.,  1.],
-               [nan,  6.,  5.,  4.],
-               [nan,  3.,  2.,  1.],
-               [nan,  6.,  5.,  4.]])
-
-        For sparse data, everything behaves similarly,
-        except that for `join='outer'`, zeros are added.
-
-        >>> from scipy.sparse import csr_matrix
-        >>> adata1 = AnnData(
-        ...     csr_matrix([[0, 2, 3], [0, 5, 6]], dtype=np.float32),
-        ...     dict(obs_names=['s1', 's2'], anno1=['c1', 'c2']),
-        ...     dict(var_names=['a', 'b', 'c']),
-        ... )
-        >>> adata2 = AnnData(
-        ...     csr_matrix([[0, 2, 3], [0, 5, 6]], dtype=np.float32),
-        ...     dict(obs_names=['s3', 's4'], anno1=['c3', 'c4']),
-        ...     dict(var_names=['d', 'c', 'b']),
-        ... )
-        >>> adata3 = AnnData(
-        ... csr_matrix([[1, 2, 0], [0, 5, 6]], dtype=np.float32),
-        ...     dict(obs_names=['s5', 's6'], anno2=['d3', 'd4']),
-        ...     dict(var_names=['d', 'c', 'b']),
-        ... )
-        >>> adata = adata1.concatenate(adata2, adata3, join='outer')
-        >>> adata.var_names.astype("string")
-        Index(['a', 'b', 'c', 'd'], dtype='string')
-        >>> adata.X.toarray()
-        array([[0., 2., 3., 0.],
-               [0., 5., 6., 0.],
-               [0., 3., 2., 0.],
-               [0., 6., 5., 0.],
-               [0., 0., 2., 1.],
-               [0., 6., 5., 0.]], dtype=float32)
+            An accumulated value
         """
-        from .merge import concat, merge_dataframes, merge_outer, merge_same
+        accumulate = init
+        for attr_name in [
+            "X",
+            "obs",
+            "var",
+            "obsm",
+            "varm",
+            "obsp",
+            "varp",
+            "layers",
+        ]:
+            attr = getattr(self, attr_name)
+            acc = getattr(A, attr_name)
+            if order == "DFS-pre":
+                accumulate = func(attr, accumulate=accumulate, ref_acc=acc)
+            if attr_name != "X":
+                for elem_name in attr:
+                    ref = acc[elem_name] if acc is not None else None
+                    accumulate = func(
+                        attr[elem_name], accumulate=accumulate, ref_acc=ref
+                    )
+            if order == "DFS-post":
+                accumulate = func(attr, accumulate=accumulate, ref_acc=acc)
+        accumulate = func(self.uns, accumulate=accumulate, ref_acc=None)
+        accumulate = func(self.raw, accumulate=accumulate, ref_acc=None)
+        return accumulate
 
-        if self.isbacked:
-            msg = "Currently, concatenate only works in memory mode."
-            raise ValueError(msg)
+    def can_write(self, *, store_type: Literal["h5", "zarr"] | None) -> bool:
+        """Whether or not an `AnnData` object can be written to disk for a given store type.
 
-        if len(adatas) == 0:
-            return self.copy()
-        elif len(adatas) == 1 and not isinstance(adatas[0], AnnData):
-            adatas = adatas[0]  # backwards compatibility
-        all_adatas = (self, *adatas)
+        Parameters
+        ----------
+        store_type
+            Which backing store - `None` indicates that it can be writeable to either.
 
-        out = concat(
-            all_adatas,
-            axis=0,
-            join=join,
-            label=batch_key,
-            keys=batch_categories,
-            uns_merge=uns_merge,
-            fill_value=fill_value,
-            index_unique=index_unique,
-            pairwise=False,
-        )
+        Returns
+        -------
+            Whether or not this object is writable.
+        """
+        from anndata._io.specs.registry import _REGISTRY
 
-        # Backwards compat (some of this could be more efficient)
-        # obs used to always be an outer join
-        sparse_class = sparse.csr_matrix
-        if any(isinstance(a.X, CSArray) for a in all_adatas):
-            sparse_class = sparse.csr_array
-        out.obs = concat(
-            [AnnData(sparse_class(a.shape), obs=a.obs) for a in all_adatas],
-            axis=0,
-            join="outer",
-            label=batch_key,
-            keys=batch_categories,
-            index_unique=index_unique,
-        ).obs
-        # Removing varm
-        del out.varm
-        # Implementing old-style merging of var
-        if batch_categories is None:
-            batch_categories = np.arange(len(all_adatas)).astype(str)
-        pat = rf"-({'|'.join(batch_categories)})$"
-        out.var = merge_dataframes(
-            [a.var for a in all_adatas],
-            out.var_names,
-            partial(merge_outer, batch_keys=batch_categories, merge=merge_same),
-        )
-        out.var = out.var.iloc[
-            :,
-            (
-                out.var.columns.str
-                .extract(pat, expand=False)
-                .fillna("")
-                .argsort(kind="stable")
-            ),
-        ]
+        writeable_elems = {
+            src_type
+            for (dest_type, src_type, __) in _REGISTRY.write
+            if store_type is None or store_type in dest_type.__module__
+        }
 
-        return out
+        def predicate(
+            elem: RWAble,
+            *,
+            accumulate: bool,
+            ref_acc: AdAcc | RefAcc | AdRef | MapAcc | None,
+        ):
+            if isinstance(elem, Raw):
+                accumulate = accumulate and type(elem.X) in writeable_elems
+                return accumulate and all(
+                    type(e[attr]) in writeable_elems
+                    for e in [elem.var, elem.varm]
+                    for attr in e
+                )
+            if ref_acc is None and isinstance(elem, dict):
+                return accumulate and all(
+                    predicate(e, accumulate=accumulate, ref_acc=None)
+                    for e in elem.values()
+                )
+            if isinstance(ref_acc, AdRef) or ref_acc is None:
+                if isinstance(elem, pd.Series):
+                    # matches behavior in methods.py
+                    elem = elem._values
+                return accumulate and type(elem) in writeable_elems
+            return accumulate
+
+        return self.reduce(predicate, init=True)
 
     def var_names_make_unique(self, join: str = "-") -> None:
         # Important to go through the setter so obsm dataframes are updated too
