@@ -408,12 +408,20 @@ def _render_all_sections(
 
         PAIN POINT: reduce visits both sections and their children through
         the same callback. The only way to distinguish them is by
-        isinstance-checking the accessor type hierarchy.
+        isinstance-checking the accessor type hierarchy. This is fragile:
+        LayerAcc is used for both X (k=None) and individual layer entries
+        (k='counts'), so we must also check the key to avoid treating
+        layer entries as new sections.
         """
+        if isinstance(ref_acc, AdRef | MultiAcc | GraphAcc):
+            return False
+        if isinstance(ref_acc, LayerAcc):
+            # LayerAcc with k=None is X (handled by _is_x), k!=None is a leaf
+            return False
         return isinstance(
             ref_acc,
-            MetaAcc | LayerAcc | LayerMapAcc | MultiMapAcc | GraphMapAcc,
-        ) and not isinstance(ref_acc, AdRef | MultiAcc | GraphAcc)
+            MetaAcc | LayerMapAcc | MultiMapAcc | GraphMapAcc,
+        )
 
     def _is_x(ref_acc) -> bool:
         """Check if this is the X section (LayerAcc with k=None)."""
