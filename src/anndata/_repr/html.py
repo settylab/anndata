@@ -445,10 +445,6 @@ def _render_all_sections(
 
         doc_url = get_section_doc_url(section_name)
         tooltip = get_section_tooltip(section_name)
-        if section_name == "obs":
-            tooltip = "Observation annotations"
-        elif section_name == "var":
-            tooltip = "Variable annotations"
 
         if n_items == 0:
             finished.append(render_empty_section(section_name, doc_url, tooltip))
