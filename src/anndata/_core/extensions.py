@@ -405,7 +405,7 @@ from .section_registry import SectionProperty, SectionSpec
 def register_section(
     name: str,
     *,
-    alignment: tuple[Literal["obs", "var"], ...] = (),
+    alignment: Literal["obs", "var"] | tuple[Literal["obs", "var"], ...] = (),
     io_key: str | None = None,
 ) -> Callable[[type], type]:
     """Register a new section on :class:`~anndata.AnnData`.
@@ -418,8 +418,9 @@ def register_section(
     name
         Attribute name on AnnData (e.g., ``"obst"``). Becomes ``adata.obst``.
     alignment
-        Tuple of axes each dimension is aligned to. Examples:
-        ``("obs",)`` for obs-aligned (like obsm),
+        Axes each dimension is aligned to. A string for single-axis
+        alignment, or a tuple for multi-axis. Examples:
+        ``"obs"`` for obs-aligned (like obsm),
         ``("obs", "var")`` for both axes (like layers),
         ``("obs", "obs")`` for pairwise (like obsp),
         ``()`` for unaligned.
@@ -457,7 +458,7 @@ def register_section(
 
     .. code-block:: python
 
-        @register_section("obst", alignment=("obs",))
+        @register_section("obst", alignment="obs")
         class ObstSection:
             pass
 
@@ -465,7 +466,7 @@ def register_section(
 
     .. code-block:: python
 
-        @register_section("obst", alignment=("obs",))
+        @register_section("obst", alignment="obs")
         class ObstSection:
             value_type = nx.DiGraph
             section_after = "obsm"
@@ -496,6 +497,10 @@ def register_section(
         class ImagesSection:
             value_type = MultiscaleImage
     """
+
+    # Normalize alignment: string → 1-tuple
+    if isinstance(alignment, str):
+        alignment = (alignment,)
 
     def decorator(cls: type) -> type:
         if name in AnnData._registered_sections:

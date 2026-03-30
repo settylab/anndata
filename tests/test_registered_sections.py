@@ -29,14 +29,14 @@ def _register_test_sections():
     # obs-aligned (like obsm)
     if "sec_obs" not in ad.AnnData._registered_sections:
 
-        @register_section("sec_obs", alignment=("obs",))
+        @register_section("sec_obs", alignment="obs")
         class SecObs:
             pass
 
     # var-aligned (like varm)
     if "sec_var" not in ad.AnnData._registered_sections:
 
-        @register_section("sec_var", alignment=("var",))
+        @register_section("sec_var", alignment="var")
         class SecVar:
             pass
 
@@ -71,7 +71,7 @@ def _register_test_sections():
     # Custom type validation (TreeData-like)
     if "sec_typed" not in ad.AnnData._registered_sections:
 
-        @register_section("sec_typed", alignment=("obs",))
+        @register_section("sec_typed", alignment="obs")
         class SecTyped:
             value_type = np.ndarray
 
@@ -84,7 +84,7 @@ def _register_test_sections():
     # Custom serialize/deserialize
     if "sec_custom_io" not in ad.AnnData._registered_sections:
 
-        @register_section("sec_custom_io", alignment=("obs",))
+        @register_section("sec_custom_io", alignment="obs")
         class SecCustomIO:
             @staticmethod
             def serialize(value):
@@ -98,7 +98,7 @@ def _register_test_sections():
     # Custom subset
     if "sec_custom_subset" not in ad.AnnData._registered_sections:
 
-        @register_section("sec_custom_subset", alignment=("obs",))
+        @register_section("sec_custom_subset", alignment="obs")
         class SecCustomSubset:
             @staticmethod
             def subset(value, idx):
@@ -129,11 +129,11 @@ class TestRegistrationAPI:
 
     def test_register_duplicate_raises(self):
         with pytest.raises(ValueError, match="already registered"):
-            register_section("sec_obs", alignment=("obs",))(type("Dup", (), {}))
+            register_section("sec_obs", alignment="obs")(type("Dup", (), {}))
 
     def test_register_reserved_name_raises(self):
         with pytest.raises(AttributeError, match="conflicts with"):
-            register_section("obs", alignment=("obs",))(type("Bad", (), {}))
+            register_section("obs", alignment="obs")(type("Bad", (), {}))
 
     def test_all_sections_in_registry(self):
         for name in [
