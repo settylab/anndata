@@ -205,6 +205,7 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
     )
 
     _accessors: ClassVar[set[str]] = set()
+    _registered_sections: ClassVar[dict] = {}  # str -> SectionSpec
 
     # view attributes
     _adata_ref: AnnData | None
@@ -242,6 +243,7 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
         varp: np.ndarray | Mapping[str, Sequence[Any]] | None = None,
         oidx: _Index1DNorm | int | np.integer | None = None,
         vidx: _Index1DNorm | int | np.integer | None = None,
+        **extra_sections,
     ):
         # check for any multi-indices that aren’t later checked in coerce_array
         for attr, key in [(obs, "obs"), (var, "var"), (X, "X")]:
@@ -270,6 +272,7 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
                 varp=varp,
                 filename=filename,
                 filemode=filemode,
+                **extra_sections,
             )
 
     def _init_as_view(
@@ -361,6 +364,7 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
         shape=None,
         filename=None,
         filemode=None,
+        **extra_sections,
     ):
         # view attributes
         self._is_view = False
@@ -391,6 +395,12 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
                 if any((obs, var, uns, obsm, varm, obsp, varp)):
                     msg = "If `X` is a dict no further arguments must be provided."
                     raise ValueError(msg)
+                # Copy registered sections from source AnnData
+                for sec_name in self._registered_sections:
+                    if sec_name not in extra_sections:
+                        src_mapping = getattr(X, sec_name, None)
+                        if src_mapping is not None and len(src_mapping) > 0:
+                            extra_sections[sec_name] = dict(src_mapping)
                 X, obs, var, uns, obsm, varm, obsp, varp, layers, raw = (
                     X._X,
                     X.obs,
@@ -509,6 +519,12 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
         # layers
         self.layers = layers
 
+        # registered sections (e.g., obst, vart from extensions)
+        for sec_name in self._registered_sections:
+            value = extra_sections.get(sec_name)
+            if value is not None:
+                setattr(self, sec_name, value)
+
     @old_positionals("show_stratified", "with_disk")
     def __sizeof__(
         self, *, show_stratified: bool = False, with_disk: bool = False
@@ -556,6 +572,7 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
             "layers",
             "obsp",
             "varp",
+            *self._registered_sections,
         ]:
             keys = getattr(self, attr).keys()
             if len(keys) > 0:
@@ -1413,7 +1430,7 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
             raise NotImplementedError(msg)
         new = {}
 
-        for key in ["obs", "var", "obsm", "varm", "obsp", "varp", "layers"]:
+        for key in ["obs", "var", "obsm", "varm", "obsp", "varp", "layers", *self._registered_sections]:
             if key in kwargs:
                 new[key] = kwargs[key]
             else:

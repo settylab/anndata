@@ -98,10 +98,19 @@ class AlignedMappingBase[I: OneDIdx](MutableMapping[str, Value], ABC):
         name = f"{self.attrname.title().rstrip('s')} {key!r}"
         return coerce_array(val, name=name, allow_df=self._allow_df)
 
+    _attrname_override: str | None = None
+
     @property
-    @abstractmethod
     def attrname(self) -> str:
         """What attr for the AnnData is this?"""
+        if self._attrname_override is not None:
+            return self._attrname_override
+        return self._default_attrname
+
+    @property
+    @abstractmethod
+    def _default_attrname(self) -> str:
+        """Default attr name derived from axis (e.g., 'obsm', 'varp')."""
 
     @property
     @abstractmethod
@@ -151,6 +160,9 @@ class AlignedView[P: AlignedMappingBase, I: (OneDIdx, TwoDIdx)](AlignedMappingBa
         self.parent_mapping = parent_mapping
         self._parent = parent_view
         self.subset_idx = subset_idx
+        # Propagate attrname override from actual to view (for registered sections)
+        if parent_mapping._attrname_override is not None:
+            self._attrname_override = parent_mapping._attrname_override
         if hasattr(parent_mapping, "_axis"):
             # LayersBase has no _axis, the rest does
             self._axis = parent_mapping._axis  # type: ignore
@@ -237,7 +249,7 @@ class AxisArraysBase(AlignedMappingBase):
     _axis: Literal[0, 1]
 
     @property
-    def attrname(self) -> str:
+    def _default_attrname(self) -> str:
         return f"{self.dim}m"
 
     @property
@@ -311,8 +323,11 @@ class LayersBase(AlignedMappingBase):
     """
 
     _allow_df: ClassVar = False
-    attrname: ClassVar[Literal["layers"]] = "layers"
     axes: ClassVar[tuple[Literal[0], Literal[1]]] = (0, 1)
+
+    @property
+    def _default_attrname(self) -> str:
+        return "layers"
 
 
 class Layers(AlignedActual, LayersBase):
@@ -339,7 +354,7 @@ class PairwiseArraysBase(AlignedMappingBase):
     _axis: Literal[0, 1]
 
     @property
-    def attrname(self) -> str:
+    def _default_attrname(self) -> str:
         return f"{self.dim}p"
 
     @property
@@ -402,8 +417,13 @@ class AlignedMappingProperty[T: AlignedMapping](property):
 
     def construct(self, obj: AnnData, *, store: MutableMapping[str, Value]) -> T:
         if self.axis is None:
-            return self.cls(obj, store=store)
-        return self.cls(obj, axis=self.axis, store=store)
+            mapping = self.cls(obj, store=store)
+        else:
+            mapping = self.cls(obj, axis=self.axis, store=store)
+        # Override attrname for registered sections (e.g., "obst" instead of "obsm")
+        if mapping._default_attrname != self.name:
+            mapping._attrname_override = self.name
+        return mapping
 
     @property
     def fget(self) -> Callable[[], None]:
@@ -420,7 +440,11 @@ class AlignedMappingProperty[T: AlignedMapping](property):
             # this needs to return a `property` instance, e.g. for Sphinx
             return self  # type: ignore
         if not obj.is_view:
-            return self.construct(obj, store=getattr(obj, f"_{self.name}"))
+            store = getattr(obj, f"_{self.name}", None)
+            if store is None:
+                store = {}
+                setattr(obj, f"_{self.name}", store)
+            return self.construct(obj, store=store)
         parent_anndata = obj._adata_ref
         idxs = (obj._oidx, obj._vidx)
         parent: AlignedMapping = getattr(parent_anndata, self.name)
