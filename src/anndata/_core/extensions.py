@@ -471,12 +471,12 @@ def register_aligned_section(
         PairwiseArrays,
     )
 
-    if name in _reserved_namespaces:
-        msg = f"Cannot register section {name!r}: conflicts with existing AnnData attribute"
-        raise AttributeError(msg)
     if name in AnnData._registered_sections:
         msg = f"Section {name!r} is already registered"
         raise ValueError(msg)
+    if name in _reserved_namespaces:
+        msg = f"Cannot register section {name!r}: conflicts with existing AnnData attribute"
+        raise AttributeError(msg)
 
     # Select the right aligned mapping class
     cls_map = {

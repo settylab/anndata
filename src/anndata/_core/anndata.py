@@ -395,6 +395,12 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
                 if any((obs, var, uns, obsm, varm, obsp, varp)):
                     msg = "If `X` is a dict no further arguments must be provided."
                     raise ValueError(msg)
+                # Copy registered sections from source AnnData
+                for sec_name in self._registered_sections:
+                    if sec_name not in extra_sections:
+                        src_mapping = getattr(X, sec_name, None)
+                        if src_mapping is not None and len(src_mapping) > 0:
+                            extra_sections[sec_name] = dict(src_mapping)
                 X, obs, var, uns, obsm, varm, obsp, varp, layers, raw = (
                     X._X,
                     X.obs,
@@ -1424,7 +1430,7 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
             raise NotImplementedError(msg)
         new = {}
 
-        for key in ["obs", "var", "obsm", "varm", "obsp", "varp", "layers"]:
+        for key in ["obs", "var", "obsm", "varm", "obsp", "varp", "layers", *self._registered_sections]:
             if key in kwargs:
                 new[key] = kwargs[key]
             else:
