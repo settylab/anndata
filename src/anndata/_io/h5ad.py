@@ -101,6 +101,13 @@ def write_h5ad(
         write_elem(f, "varp", dict(adata.varp), dataset_kwargs=dataset_kwargs)
         write_elem(f, "layers", dict(adata.layers), dataset_kwargs=dataset_kwargs)
         write_elem(f, "uns", dict(adata.uns), dataset_kwargs=dataset_kwargs)
+        # Write registered sections (e.g., obst, vart from extensions)
+        for sec_name, sec_info in adata._registered_sections.items():
+            mapping = getattr(adata, sec_name, None)
+            if mapping is not None and len(mapping) > 0:
+                write_elem(
+                    f, sec_info.io_key, dict(mapping), dataset_kwargs=dataset_kwargs
+                )
 
 
 def _write_x(

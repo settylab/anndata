@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 # Based off of the extension framework in Polars
 # https://github.com/pola-rs/polars/blob/main/py-polars/polars/api.py
 
-__all__ = ["register_anndata_namespace"]
+__all__ = ["register_anndata_namespace", "register_aligned_section", "SectionRegistration"]
 
 # Protocol for accessors that provide section visualization
 REPR_SECTION_METHOD = "_repr_section_"
@@ -390,3 +390,116 @@ def register_anndata_namespace[NameSpT: ExtensionNamespace](
         adata._repr_html_()  # Shows "spatial" section with "hires" entry
     """
     return _create_namespace(name, AnnData)
+
+
+# ---------------------------------------------------------------------------
+# Section registration
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class SectionRegistration:
+    """Metadata for a registered aligned section.
+
+    Instances are stored in ``AnnData._registered_sections``.
+    """
+
+    name: str
+    """Attribute name on AnnData (e.g., ``"obst"``)."""
+    mapping_type: Literal["axis", "pairwise", "layers"]
+    """Which AlignedMapping family to use."""
+    axis: Literal[0, 1] | None
+    """``0`` for obs-aligned, ``1`` for var-aligned, ``None`` for layers-like."""
+    allow_df: bool
+    """Whether DataFrames are allowed as values."""
+    io_key: str
+    """Key used in h5ad/zarr files."""
+
+
+def register_aligned_section(
+    name: str,
+    *,
+    axis: Literal[0, 1] | None = None,
+    mapping_type: Literal["axis", "pairwise", "layers"] = "axis",
+    allow_df: bool = True,
+    io_key: str | None = None,
+) -> None:
+    """Register a new axis-aligned section on :class:`~anndata.AnnData`.
+
+    This allows external packages to add new mappings (like ``obsm``, ``layers``)
+    that participate in subsetting, IO, repr, and traversal without subclassing.
+
+    Parameters
+    ----------
+    name
+        Attribute name on AnnData (e.g., ``"obst"``). Becomes ``adata.obst``.
+    axis
+        ``0`` for obs-aligned, ``1`` for var-aligned, ``None`` for both-axes
+        (layers-like).
+    mapping_type
+        ``"axis"`` for :class:`AxisArrays` (like obsm/varm),
+        ``"pairwise"`` for :class:`PairwiseArrays` (like obsp/varp),
+        ``"layers"`` for :class:`Layers`.
+    allow_df
+        Whether to allow DataFrames as values.
+    io_key
+        Key used in h5ad/zarr files. Defaults to *name*.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import anndata as ad
+        from anndata.extensions import register_aligned_section
+
+        # Register at import time
+        register_aligned_section("obst", axis=0, mapping_type="axis")
+
+        adata = ad.AnnData(obs=pd.DataFrame(index=["c1", "c2", "c3"]))
+        adata.obst["lineage"] = np.eye(3)       # validates shape against n_obs
+        sub = adata[:2]                           # sub.obst["lineage"] is subsetted
+        adata.write("test.h5ad")                  # obst is written
+        adata2 = ad.read_h5ad("test.h5ad")        # obst is read back
+    """
+    from .aligned_mapping import (
+        AlignedMappingProperty,
+        AxisArrays,
+        Layers,
+        PairwiseArrays,
+    )
+
+    if name in _reserved_namespaces:
+        msg = f"Cannot register section {name!r}: conflicts with existing AnnData attribute"
+        raise AttributeError(msg)
+    if name in AnnData._registered_sections:
+        msg = f"Section {name!r} is already registered"
+        raise ValueError(msg)
+
+    # Select the right aligned mapping class
+    cls_map = {
+        "axis": AxisArrays,
+        "pairwise": PairwiseArrays,
+        "layers": Layers,
+    }
+    if mapping_type not in cls_map:
+        msg = f"Unknown mapping_type: {mapping_type!r}. Must be one of {list(cls_map)}"
+        raise ValueError(msg)
+    cls = cls_map[mapping_type]
+
+    # Create and attach the property descriptor
+    prop = AlignedMappingProperty(name, cls, axis)
+    setattr(AnnData, name, prop)
+
+    # Register in the class-level registry
+    reg = SectionRegistration(
+        name=name,
+        mapping_type=mapping_type,
+        axis=axis,
+        allow_df=allow_df,
+        io_key=io_key or name,
+    )
+    AnnData._registered_sections[name] = reg
+    _reserved_namespaces.add(name)

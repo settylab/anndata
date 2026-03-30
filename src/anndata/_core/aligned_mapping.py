@@ -420,7 +420,11 @@ class AlignedMappingProperty[T: AlignedMapping](property):
             # this needs to return a `property` instance, e.g. for Sphinx
             return self  # type: ignore
         if not obj.is_view:
-            return self.construct(obj, store=getattr(obj, f"_{self.name}"))
+            store = getattr(obj, f"_{self.name}", None)
+            if store is None:
+                store = {}
+                setattr(obj, f"_{self.name}", store)
+            return self.construct(obj, store=store)
         parent_anndata = obj._adata_ref
         idxs = (obj._oidx, obj._vidx)
         parent: AlignedMapping = getattr(parent_anndata, self.name)
