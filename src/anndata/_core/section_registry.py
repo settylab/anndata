@@ -198,7 +198,36 @@ class SectionMappingView(Mapping):
         idx = self._build_index()
         if self._spec.subset_fn is not None:
             return self._spec.subset_fn(value, idx)
-        # Default: use anndata's _subset
+        # Default subsetting: handle N-dimensional alignment
+        # anndata's _subset is designed for ≤2D, so for higher dims
+        # we do the indexing directly.
+        import numpy as np
+
+        from anndata.compat import IndexManager
+
+        if isinstance(idx, tuple) and len(idx) > 2:
+            # Convert IndexManagers to numpy arrays
+            resolved = []
+            for ix in idx:
+                if isinstance(ix, IndexManager):
+                    resolved.append(np.asarray(ix))
+                else:
+                    resolved.append(ix)
+            # Use np.ix_ for fancy indexing on non-slice dims
+            fancy_dims = [
+                i for i, ix in enumerate(resolved) if not isinstance(ix, slice)
+            ]
+            if fancy_dims:
+                # Build an open mesh for fancy-indexed dims
+                fancy_arrs = [resolved[i] for i in fancy_dims]
+                mesh = np.ix_(*fancy_arrs)
+                # Build the full index tuple
+                full_idx = list(resolved)
+                for mi, di in enumerate(fancy_dims):
+                    full_idx[di] = mesh[mi]
+                return value[tuple(full_idx)]
+            return value[tuple(resolved)]
+        # ≤2D: use anndata's _subset
         from .index import _subset
 
         return _subset(value, idx)

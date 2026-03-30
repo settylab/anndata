@@ -97,6 +97,24 @@ def _register_test_sections():
             def deserialize(data):
                 return json.loads(data)
 
+    # Cell-cell communication tensor: (sender, receiver, gene)
+    if "cellcomm" not in ad.AnnData._registered_sections:
+
+        @register_section("cellcomm", alignment=("obs", "obs", "var"))
+        class CellCommSection:
+            """Ligand-receptor communication scores (sender × receiver × gene)."""
+            section_after = "obsp"
+            section_tooltip = "Cell-cell communication"
+
+    # Cell-specific gene-gene interactions: (obs, var, var)
+    if "genereg" not in ad.AnnData._registered_sections:
+
+        @register_section("genereg", alignment=("obs", "var", "var"))
+        class GeneRegSection:
+            """Cell-specific gene regulatory networks (cell × gene × gene)."""
+            section_after = "varp"
+            section_tooltip = "Gene regulation per cell"
+
     # Custom subset
     if "sec_custom_subset" not in ad.AnnData._registered_sections:
 
@@ -506,6 +524,167 @@ class TestTreeDataScenario:
 # ---------------------------------------------------------------------------
 # SpatialData-like end-to-end scenario
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# xarray DataArray layers (custom type + serialize/deserialize)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Cell-cell communication tensor: alignment=("obs", "obs", "var")
+# ---------------------------------------------------------------------------
+
+
+class TestCellCommunication:
+    """3D tensor for ligand-receptor communication scores.
+
+    Tools like CellChat, LIANA, and CellPhoneDB compute communication
+    strengths between cell pairs mediated by specific genes. The natural
+    shape is (sender_cell, receiver_cell, gene). With alignment=("obs",
+    "obs", "var"), the tensor subsets correctly when filtering cells or genes.
+    """
+
+    def test_store_tensor(self, adata):
+        comm = np.random.rand(5, 5, 3)
+        adata.cellcomm["lr_scores"] = comm
+        assert adata.cellcomm["lr_scores"].shape == (5, 5, 3)
+
+    def test_validates_obs_dim(self, adata):
+        with pytest.raises(ValueError, match="shape"):
+            adata.cellcomm["bad"] = np.ones((10, 10, 3))
+
+    def test_validates_var_dim(self, adata):
+        with pytest.raises(ValueError, match="shape"):
+            adata.cellcomm["bad"] = np.ones((5, 5, 10))
+
+    def test_validates_square_obs(self, adata):
+        """Sender and receiver must both be n_obs."""
+        with pytest.raises(ValueError, match="shape"):
+            adata.cellcomm["bad"] = np.ones((5, 3, 3))
+
+    def test_subset_cells(self, adata):
+        """Filtering cells subsets both sender and receiver dims."""
+        adata.cellcomm["lr"] = np.random.rand(5, 5, 3)
+        sub = adata[:3]
+        assert sub.cellcomm["lr"].shape == (3, 3, 3)
+
+    def test_subset_genes(self, adata):
+        """Filtering genes subsets the third dim."""
+        adata.cellcomm["lr"] = np.random.rand(5, 5, 3)
+        sub = adata[:, :2]
+        assert sub.cellcomm["lr"].shape == (5, 5, 2)
+
+    def test_subset_both(self, adata):
+        adata.cellcomm["lr"] = np.random.rand(5, 5, 3)
+        sub = adata[:3, :2]
+        assert sub.cellcomm["lr"].shape == (3, 3, 2)
+
+    def test_io_roundtrip(self, adata, tmp_path):
+        comm = np.random.rand(5, 5, 3)
+        adata.cellcomm["lr_scores"] = comm
+        path = tmp_path / "comm.h5ad"
+        adata.write(path)
+        adata2 = ad.read_h5ad(path)
+        np.testing.assert_array_almost_equal(
+            adata2.cellcomm["lr_scores"], comm
+        )
+
+    def test_workflow(self, tmp_path):
+        """End-to-end: simulate CellChat-like analysis."""
+        n_obs, n_vars = 20, 50
+        adata = ad.AnnData(
+            X=np.random.rand(n_obs, n_vars),
+            obs=pd.DataFrame(
+                {"cell_type": pd.Categorical(["T"] * 10 + ["B"] * 10)},
+                index=[f"cell_{i}" for i in range(n_obs)],
+            ),
+            var=pd.DataFrame(
+                {"is_ligand": [True] * 25 + [False] * 25},
+                index=[f"gene_{i}" for i in range(n_vars)],
+            ),
+        )
+
+        # Compute communication scores (simulated)
+        adata.cellcomm["cellchat"] = np.random.rand(n_obs, n_obs, n_vars)
+
+        # Filter to T cells only
+        t_cells = adata.obs["cell_type"] == "T"
+        sub = adata[t_cells]
+        assert sub.cellcomm["cellchat"].shape == (10, 10, n_vars)
+
+        # Filter to ligand genes only
+        ligands = adata.var["is_ligand"]
+        sub2 = adata[:, ligands]
+        assert sub2.cellcomm["cellchat"].shape == (n_obs, n_obs, 25)
+
+        # IO roundtrip
+        path = tmp_path / "cellchat.h5ad"
+        adata.write(path)
+        adata2 = ad.read_h5ad(path)
+        assert adata2.cellcomm["cellchat"].shape == (n_obs, n_obs, n_vars)
+
+
+# ---------------------------------------------------------------------------
+# xarray DataArray layers (custom type + serialize/deserialize)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Cell-specific gene regulation: alignment=("obs", "var", "var")
+# ---------------------------------------------------------------------------
+
+
+class TestGeneRegulation:
+    """3D tensor for cell-specific gene regulatory networks.
+
+    Each cell has its own gene-gene interaction matrix (e.g., inferred
+    from single-cell GRN methods like SCENIC, CellOracle, or Dictys).
+    Shape is (cell, source_gene, target_gene). Subsetting cells reduces
+    the first dim, subsetting genes reduces both gene dims.
+    """
+
+    def test_store_tensor(self, adata):
+        grn = np.random.rand(5, 3, 3)
+        adata.genereg["scenic"] = grn
+        assert adata.genereg["scenic"].shape == (5, 3, 3)
+
+    def test_validates_obs_dim(self, adata):
+        with pytest.raises(ValueError, match="shape"):
+            adata.genereg["bad"] = np.ones((10, 3, 3))
+
+    def test_validates_var_dims(self, adata):
+        with pytest.raises(ValueError, match="shape"):
+            adata.genereg["bad"] = np.ones((5, 10, 3))  # source wrong
+        with pytest.raises(ValueError, match="shape"):
+            adata.genereg["bad"] = np.ones((5, 3, 10))  # target wrong
+
+    def test_subset_cells(self, adata):
+        """Filtering cells subsets the first dim only."""
+        adata.genereg["grn"] = np.random.rand(5, 3, 3)
+        sub = adata[:3]
+        assert sub.genereg["grn"].shape == (3, 3, 3)
+
+    def test_subset_genes(self, adata):
+        """Filtering genes subsets both gene dims (source and target)."""
+        adata.genereg["grn"] = np.random.rand(5, 3, 3)
+        sub = adata[:, :2]
+        assert sub.genereg["grn"].shape == (5, 2, 2)
+
+    def test_subset_both(self, adata):
+        adata.genereg["grn"] = np.random.rand(5, 3, 3)
+        sub = adata[:3, :2]
+        assert sub.genereg["grn"].shape == (3, 2, 2)
+
+    def test_io_roundtrip(self, adata, tmp_path):
+        grn = np.random.rand(5, 3, 3)
+        adata.genereg["scenic"] = grn
+        path = tmp_path / "grn.h5ad"
+        adata.write(path)
+        adata2 = ad.read_h5ad(path)
+        np.testing.assert_array_almost_equal(
+            adata2.genereg["scenic"], grn
+        )
 
 
 # ---------------------------------------------------------------------------
