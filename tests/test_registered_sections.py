@@ -2,7 +2,8 @@
 
 Validates that registered sections behave correctly for all alignment
 combinations, custom validation, custom subsetting, custom IO, and
-HTML repr integration. Uses TreeData-like and SpatialData-like scenarios.
+HTML repr integration. Uses TreeData-like, SpatialData-like, and
+xarray scenarios.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from scipy.sparse import csr_matrix
 
 import anndata as ad
@@ -104,6 +106,21 @@ def _register_test_sections():
             def subset(value, idx):
                 # Custom: return a dict describing the subset
                 return {"original": value, "subset_idx": idx}
+
+    # xarray layers (custom type with serialize/deserialize)
+    if "xr_layers" not in ad.AnnData._registered_sections:
+
+        @register_section("xr_layers", alignment=("obs", "var"))
+        class XarrayLayers:
+            value_type = xr.DataArray
+
+            @staticmethod
+            def serialize(value):
+                return value.values  # xarray → numpy for h5ad
+
+            @staticmethod
+            def deserialize(data):
+                return xr.DataArray(data)  # numpy → xarray on read
 
 
 @pytest.fixture
@@ -484,6 +501,83 @@ class TestTreeDataScenario:
         # Repr
         assert "sec_obs" in repr(adata2)
         assert "sec_var" in repr(adata2)
+
+
+# ---------------------------------------------------------------------------
+# SpatialData-like end-to-end scenario
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# xarray DataArray layers (custom type + serialize/deserialize)
+# ---------------------------------------------------------------------------
+
+
+class TestXarrayScenario:
+    """xarray DataArrays as layer values with custom serialization."""
+
+    def test_store_xarray(self, adata):
+        da = xr.DataArray(np.random.rand(5, 3), dims=["obs", "var"])
+        adata.xr_layers["normalized"] = da
+        assert isinstance(adata.xr_layers["normalized"], xr.DataArray)
+        assert adata.xr_layers["normalized"].shape == (5, 3)
+
+    def test_type_enforcement(self, adata):
+        with pytest.raises(TypeError, match="must be DataArray"):
+            adata.xr_layers["bad"] = np.ones((5, 3))
+
+    def test_alignment_validation(self, adata):
+        with pytest.raises(ValueError, match="shape"):
+            adata.xr_layers["bad"] = xr.DataArray(np.ones((10, 3)))
+
+    def test_subset(self, adata):
+        da = xr.DataArray(np.arange(15.0).reshape(5, 3), dims=["obs", "var"])
+        adata.xr_layers["data"] = da
+        sub = adata[:3, :2]
+        result = sub.xr_layers["data"]
+        assert result.shape == (3, 2)
+
+    def test_io_roundtrip(self, adata, tmp_path):
+        da = xr.DataArray(np.arange(15.0).reshape(5, 3), dims=["obs", "var"])
+        adata.xr_layers["data"] = da
+        path = tmp_path / "xr.h5ad"
+        adata.write(path)
+        adata2 = ad.read_h5ad(path)
+        # Deserialized back to xarray
+        assert isinstance(adata2.xr_layers["data"], xr.DataArray)
+        np.testing.assert_array_equal(
+            adata2.xr_layers["data"].values, np.arange(15.0).reshape(5, 3)
+        )
+
+    def test_full_workflow(self, tmp_path):
+        """End-to-end: store, subset, copy, IO with xarray layers."""
+        adata = ad.AnnData(
+            X=np.ones((10, 5)),
+            obs=pd.DataFrame(index=[f"c{i}" for i in range(10)]),
+            var=pd.DataFrame(index=[f"g{i}" for i in range(5)]),
+            xr_layers={
+                "scaled": xr.DataArray(np.random.rand(10, 5), dims=["obs", "var"]),
+            },
+        )
+
+        # Subset preserves type
+        sub = adata[:5]
+        assert isinstance(sub.xr_layers["scaled"], xr.DataArray)
+        assert sub.xr_layers["scaled"].shape == (5, 5)
+
+        # Copy preserves type
+        copy = adata.copy()
+        assert isinstance(copy.xr_layers["scaled"], xr.DataArray)
+
+        # IO roundtrip preserves type
+        path = tmp_path / "xr_workflow.h5ad"
+        adata.write(path)
+        adata2 = ad.read_h5ad(path)
+        assert isinstance(adata2.xr_layers["scaled"], xr.DataArray)
+        assert adata2.xr_layers["scaled"].shape == (10, 5)
+
+        # Repr shows section
+        assert "xr_layers" in repr(adata)
 
 
 # ---------------------------------------------------------------------------
