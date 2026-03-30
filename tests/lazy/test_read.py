@@ -94,16 +94,16 @@ def test_access_count_index(
 ) -> None:
     adata_orig = read_zarr(adata_remote_with_store_tall_skinny_path)
 
-    remote_store_tall_skinny.initialize_key_trackers(["obs/_index"])
+    remote_store_tall_skinny.initialize_key_trackers(["obs/obs_names"])
     read_lazy(remote_store_tall_skinny, load_annotation_index=False)
-    remote_store_tall_skinny.assert_access_count("obs/_index", 0)
+    remote_store_tall_skinny.assert_access_count("obs/obs_names", 0)
 
     read_lazy(remote_store_tall_skinny)
     n_chunks = 4
     count_expected = (  # *2 when mask exists
         n_chunks * 2 if adata_orig.obs.index.dtype == "string" else n_chunks
     )
-    remote_store_tall_skinny.assert_access_count("obs/_index", count_expected)
+    remote_store_tall_skinny.assert_access_count("obs/obs_names", count_expected)
 
 
 def test_access_count_dtype(
@@ -111,18 +111,16 @@ def test_access_count_dtype(
     adata_remote_tall_skinny: AnnData,
     adata_remote_with_store_tall_skinny_path: Path,
 ) -> None:
-    adata_orig = read_zarr(adata_remote_with_store_tall_skinny_path)
 
     remote_store_tall_skinny.initialize_key_trackers(["obs/cat/categories"])
     remote_store_tall_skinny.assert_access_count("obs/cat/categories", 0)
 
-    count_expected = 2 if adata_orig.obs["cat"].cat.categories.dtype == "string" else 1
     # This should only cause categories to be read in once (and their mask if applicable)
     adata_remote_tall_skinny.obs["cat"].dtype  # noqa: B018
-    remote_store_tall_skinny.assert_access_count("obs/cat/categories", count_expected)
+    remote_store_tall_skinny.assert_access_count("obs/cat/categories", 1)
     adata_remote_tall_skinny.obs["cat"].dtype  # noqa: B018
     adata_remote_tall_skinny.obs["cat"].dtype  # noqa: B018
-    remote_store_tall_skinny.assert_access_count("obs/cat/categories", count_expected)
+    remote_store_tall_skinny.assert_access_count("obs/cat/categories", 1)
 
 
 def test_uns_uses_dask(adata_remote: AnnData):
@@ -143,7 +141,7 @@ def test_access_counts_obsm_df(tmp_path: Path):
         index=adata.obs_names,
     )
     adata.write_zarr(tmp_path)
-    store = AccessTrackingStore(tmp_path)
+    store = AccessTrackingStore(tmp_path, read_only=True)
     store.initialize_key_trackers(["obsm/df"])
     read_lazy(store, load_annotation_index=False)
     store.assert_access_count("obsm/df", 0)
@@ -191,13 +189,25 @@ def test_unconsolidated(tmp_path: Path, mtx_format):
     orig_pth = tmp_path / "orig.zarr"
     adata.write_zarr(orig_pth)
     (orig_pth / ".zmetadata").unlink()
-    store = AccessTrackingStore(orig_pth)
+    store = AccessTrackingStore(orig_pth, read_only=True)
     store.initialize_key_trackers(["obs/.zgroup", ".zgroup"])
     with pytest.warns(UserWarning, match=r"Did not read zarr as consolidated"):
         remote = read_lazy(store)
     remote_to_memory = remote.to_memory()
     assert_equal(remote_to_memory, adata)
     store.assert_access_count("obs/.zgroup", 1)
+
+
+@pytest.mark.zarr_io
+def test_empty_df_warns(tmp_path: Path):
+    adata = AnnData(X=np.ones((10, 10)))
+    zarr_path = tmp_path / "orig.zarr"
+    adata.write_zarr(zarr_path)
+    with pytest.warns(
+        UserWarning,
+        match=r"Renaming or reordering columns on `Dataset2D` has no effect",
+    ):
+        adata.obs = read_elem_lazy(zarr.open(zarr_path)["obs"])
 
 
 def test_h5_file_obj(tmp_path: Path):
@@ -234,3 +244,32 @@ def test_chunks_df(
     for k in ds:
         if isinstance(arr := ds[k].data, DaskArray):
             assert arr.chunksize == expected_chunks
+
+
+def test_nullable_string_index_decoding(tmp_path: Path):
+    """Test that nullable string indices are properly decoded from bytes.
+
+    HDF5 stores strings as bytes. When reading nullable-string-array indices,
+    they should be decoded to proper strings, not converted using str() which
+    would produce "b'...'" representations.
+
+    Regression test for https://github.com/scverse/anndata/issues/2271
+    """
+    expected_obs = ["cell_A", "cell_B", "cell_C", "cell_D", "cell_E"]
+    expected_var = ["gene_X", "gene_Y", "gene_Z"]
+
+    adata = AnnData(
+        np.zeros((len(expected_obs), len(expected_var))),
+        obs=dict(obs_names=expected_obs),
+        var=dict(var_names=expected_var),
+    )
+
+    path = tmp_path / "test.h5ad"
+    adata.write_h5ad(path)
+
+    lazy = read_lazy(path)
+    obs_names = list(lazy.obs_names)
+    var_names = list(lazy.var_names)
+
+    assert obs_names == expected_obs
+    assert var_names == expected_var

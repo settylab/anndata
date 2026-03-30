@@ -28,6 +28,7 @@ from ..compat import (
     CupyCSRMatrix,
     CupySparseMatrix,
     DaskArray,
+    has_xp,
 )
 from ..utils import asarray, axis_len, warn, warn_once
 from .anndata import AnnData
@@ -43,7 +44,8 @@ if TYPE_CHECKING:
 
     from anndata._types import Join_T
 
-    from ..compat import XDataArray, XDataset
+    from ..compat import XDataArray
+    from ..types import SupportsArrayApi
 
 
 ###################
@@ -425,7 +427,7 @@ def unique_value[T](vals: Collection[T]) -> T | MissingVal:
 
 def first[T](vals: Collection[T]) -> T | MissingVal:
     """
-    Given a collection of vals, return the first non-missing one.If they're all missing,
+    Given a collection of vals, return the first non-missing one. If they're all missing,
     return MissingVal.
     """
     for val in vals:
@@ -567,8 +569,11 @@ class Reindexer:
             return self._apply_to_dask_array(el, axis=axis, fill_value=fill_value)
         elif isinstance(el, CupyArray):
             return self._apply_to_cupy_array(el, axis=axis, fill_value=fill_value)
-        else:
-            return self._apply_to_array(el, axis=axis, fill_value=fill_value)
+        elif has_xp(el):
+            return self._apply_to_array_api(el, axis=axis, fill_value=fill_value)
+        else:  # pragma: no cover
+            msg = "Cannot reindex element of unsupported type."
+            raise TypeError(msg)
 
     def _apply_to_df_like(self, el: pd.DataFrame | Dataset2D, *, axis, fill_value=None):
         if fill_value is None:
@@ -623,21 +628,34 @@ class Reindexer:
 
         return out
 
-    def _apply_to_array(self, el, *, axis, fill_value=None):
+    def _apply_to_array_api(
+        self, el: SupportsArrayApi, *, axis: int, fill_value=None
+    ) -> SupportsArrayApi:
         if fill_value is None:
             fill_value = default_fill_value([el])
+        xp = el.__array_namespace__()
+        indexer = xp.asarray(self.idx)
+
+        # Handling edge case to mimic pandas behavior
         if el.shape[axis] == 0:
-            # Presumably faster since it won't allocate the full array
             shape = list(el.shape)
-            shape[axis] = len(self.new_idx)
-            return np.broadcast_to(fill_value, tuple(shape))
-
-        indexer = self.idx
-
-        # Indexes real fast, and does outer indexing
-        return pd.api.extensions.take(
-            el, indexer, axis=axis, allow_fill=True, fill_value=fill_value
-        )
+            shape[axis] = indexer.shape[0]
+            # convert fill_value to the same type as el - to keep everything in the same dtype
+            # fv = xp.asarray(fill_value, dtype=getattr(el, "dtype", None))
+            fv = xp.asarray(fill_value)
+            return xp.broadcast_to(fv, shape)
+        # marking which positions are missing, so we could use fill_value
+        missing_mask = indexer == -1
+        safe_indexer = xp.where(missing_mask, 0, indexer)
+        taken = xp.take(el, safe_indexer, axis=axis)
+        # Expand mask so we can apply xp.where along the right axis
+        shape = [1] * taken.ndim
+        shape[axis] = missing_mask.shape[0]
+        mask = missing_mask.reshape(shape)
+        if not xp.any(missing_mask):
+            return taken
+        fv = xp.asarray(fill_value)
+        return xp.where(mask, fv, taken)
 
     def _apply_to_sparse(  # noqa: PLR0912
         self, el: CSMatrix | CSArray, *, axis, fill_value=None
@@ -881,6 +899,22 @@ def concat_arrays(  # noqa: PLR0911, PLR0912
             format="csr",
         )
         return mat
+
+    elif all(has_xp(a) for a in arrays):
+        # All arrays are array-api compatible
+
+        # use first as a reference to check if all of the arrays are the same type
+        if len(array_apis := {a.__array_namespace__() for a in arrays}) > 1:
+            msg = f"Cannot concatenate array-api arrays from different backends: {array_apis}."
+            raise ValueError(msg)
+
+        return next(iter(array_apis)).concatenate(
+            [
+                f(x, fill_value=fill_value, axis=1 - axis)
+                for f, x in zip(reindexers, arrays, strict=True)
+            ],
+            axis=axis,
+        )
     else:
         return np.concatenate(
             [
@@ -1012,7 +1046,16 @@ def missing_element(
         return da.full(
             shape, default_fill_value(els) if fill_value is None else fill_value
         )
-    return np.zeros(shape, dtype=bool)
+    non_numpy_array_apis = {
+        a.__array_namespace__()
+        for a in els
+        if has_xp(a) and not isinstance(a, np.ndarray)
+    }
+    if len(non_numpy_array_apis) not in {0, 1}:
+        msg = "Cannot generate missing elements when there are multiple array backends supported including at least one that is array api compatible."
+        raise ValueError(msg)
+    xp = next(iter(non_numpy_array_apis)) if len(non_numpy_array_apis) == 1 else np
+    return xp.zeros(shape, dtype=bool)
 
 
 def outer_concat_aligned_mapping(
@@ -1181,15 +1224,13 @@ def make_dask_col_from_extension_dtype(
     A :class:`dask.Array`: representation of the column.
     """
     import dask.array as da
-    import xarray as xr
-    from xarray.core.indexing import LazilyIndexedArray
 
     from anndata._io.specs.lazy_methods import (
         compute_chunk_layout_for_axis_size,
         get_chunksize,
         maybe_open_h5,
     )
-    from anndata.compat import XDataArray
+    from anndata.compat import xarray as xr
     from anndata.experimental import read_elem_lazy
 
     base_path_or_zarr_group = col.attrs.get("base_path_or_zarr_group")
@@ -1198,7 +1239,6 @@ def make_dask_col_from_extension_dtype(
         base_path_or_zarr_group is not None and elem_name is not None
     ):  # lazy, backed by store
         dims = col.dims
-        coords = col.coords.copy()
         with maybe_open_h5(base_path_or_zarr_group, elem_name) as f:
             maybe_chunk_size = get_chunksize(read_elem_lazy(f))
             chunk_size = (
@@ -1212,17 +1252,14 @@ def make_dask_col_from_extension_dtype(
             # reopening is important to get around h5py's unserializable lock in processes
             with maybe_open_h5(base_path_or_zarr_group, elem_name) as f:
                 v = read_elem_lazy(f)
-                variable = xr.Variable(data=LazilyIndexedArray(v), dims=dims)
-                data_array = XDataArray(
-                    variable,
-                    coords=coords,
-                    dims=dims,
+                variable = xr.Variable(
+                    data=xr.core.indexing.LazilyIndexedArray(v), dims=dims
                 )
                 idx = tuple(
                     slice(start, stop)
                     for start, stop in block_info[None]["array-location"]
                 )
-                chunk = np.array(data_array.data[idx])
+                chunk = np.array(variable.data[idx])
             return chunk
 
         if col.dtype == "category" or col.dtype == "string" or use_only_object_dtype:  # noqa PLR1714
@@ -1242,7 +1279,7 @@ def make_dask_col_from_extension_dtype(
 
 def make_xarray_extension_dtypes_dask(
     annotations: Iterable[Dataset2D], *, use_only_object_dtype: bool = False
-) -> Generator[XDataset, None, None]:
+) -> Generator[Dataset2D, None, None]:
     """
     Creates a generator of Dataset2D objects with dask arrays in place of :class:`pandas.api.extensions.ExtensionArray` dtype columns.
 
@@ -1276,7 +1313,8 @@ def make_xarray_extension_dtypes_dask(
         )
 
 
-DS_CONCAT_DUMMY_INDEX_NAME = "concat_index"
+DS_CONCAT_DUMMY_INDEX_NAME = "_anndata_concat_index"
+DS_MERGE_DUMMY_INDEX_NAME = "_anndata_merge_index"
 
 
 def concat_dataset2d_on_annot_axis(
@@ -1684,14 +1722,16 @@ def concat(  # noqa: PLR0912, PLR0913, PLR0915
                 alt_annotations, use_only_object_dtype=True
             )
         )
+        for a in annotations_with_only_dask:
+            if a.true_index_dim != a.index_dim:
+                a.index = a.true_index
         annotations_with_only_dask = [
-            a.ds.rename({a.true_index_dim: "merge_index"})
+            a.ds.rename({a.true_index_dim: DS_MERGE_DUMMY_INDEX_NAME})
             for a in annotations_with_only_dask
         ]
         alt_annot = Dataset2D(
             xr.merge(annotations_with_only_dask, join=join, compat="override")
         )
-        alt_annot.true_index_dim = "merge_index"
 
     X = concat_Xs(adatas, reindexers, axis=axis, fill_value=fill_value)
 
