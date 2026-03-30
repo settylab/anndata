@@ -4,7 +4,9 @@ Public API for extending AnnData functionality.
 This module provides registration mechanisms for:
 
 1. **Accessors** - Add custom namespaces to AnnData objects (e.g., `adata.myns.method()`)
-2. **HTML Formatters** - Customize how types are displayed in Jupyter notebooks
+2. **Aligned Sections** - Add new axis-aligned mappings (e.g., `adata.obst`) with full
+   subsetting, IO, repr, and init support — no subclassing needed
+3. **HTML Formatters** - Customize how types are displayed in Jupyter notebooks
 
 Examples
 --------
@@ -79,6 +81,9 @@ from __future__ import annotations
 # Accessor registration (from PR #1870)
 from anndata._core.extensions import register_anndata_namespace
 
+# Section registration (pluggable aligned mappings)
+from anndata._core.extensions import register_aligned_section, SectionRegistration
+
 # HTML representation formatters
 from anndata._repr import (
     # Type hint utilities for tagged data
@@ -100,6 +105,9 @@ from anndata._repr import (
 __all__ = [  # noqa: RUF022  # organized by category, not alphabetically
     # Accessor registration
     "register_anndata_namespace",
+    # Section registration
+    "register_aligned_section",
+    "SectionRegistration",
     # HTML formatter registration
     "register_formatter",
     "TypeFormatter",
