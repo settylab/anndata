@@ -81,8 +81,9 @@ from __future__ import annotations
 # Accessor registration (from PR #1870)
 from anndata._core.extensions import register_anndata_namespace
 
-# Section registration (pluggable aligned mappings)
-from anndata._core.extensions import register_aligned_section, SectionRegistration
+# Section registration (pluggable sections with custom alignment, IO, validation)
+from anndata._core.extensions import register_section
+from anndata._core.section_registry import SectionSpec
 
 # HTML representation formatters
 from anndata._repr import (
@@ -106,8 +107,8 @@ __all__ = [  # noqa: RUF022  # organized by category, not alphabetically
     # Accessor registration
     "register_anndata_namespace",
     # Section registration
-    "register_aligned_section",
-    "SectionRegistration",
+    "register_section",
+    "SectionSpec",
     # HTML formatter registration
     "register_formatter",
     "TypeFormatter",

@@ -205,7 +205,7 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
     )
 
     _accessors: ClassVar[set[str]] = set()
-    _registered_sections: ClassVar[dict] = {}  # str -> SectionRegistration
+    _registered_sections: ClassVar[dict] = {}  # str -> SectionSpec
 
     # view attributes
     _adata_ref: AnnData | None

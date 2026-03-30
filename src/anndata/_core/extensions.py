@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 # Based off of the extension framework in Polars
 # https://github.com/pola-rs/polars/blob/main/py-polars/polars/api.py
 
-__all__ = ["register_anndata_namespace", "register_aligned_section", "SectionRegistration"]
+__all__ = ["register_anndata_namespace", "register_section", "SectionSpec"]
 
 # Protocol for accessors that provide section visualization
 REPR_SECTION_METHOD = "_repr_section_"
@@ -396,110 +396,193 @@ def register_anndata_namespace[NameSpT: ExtensionNamespace](
 # Section registration
 # ---------------------------------------------------------------------------
 
-from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Literal
 
-
-@dataclass(frozen=True)
-class SectionRegistration:
-    """Metadata for a registered aligned section.
-
-    Instances are stored in ``AnnData._registered_sections``.
-    """
-
-    name: str
-    """Attribute name on AnnData (e.g., ``"obst"``)."""
-    mapping_type: Literal["axis", "pairwise", "layers"]
-    """Which AlignedMapping family to use."""
-    axis: Literal[0, 1] | None
-    """``0`` for obs-aligned, ``1`` for var-aligned, ``None`` for layers-like."""
-    allow_df: bool
-    """Whether DataFrames are allowed as values."""
-    io_key: str
-    """Key used in h5ad/zarr files."""
+from .section_registry import SectionProperty, SectionSpec
 
 
-def register_aligned_section(
+def register_section(
     name: str,
     *,
-    axis: Literal[0, 1] | None = None,
-    mapping_type: Literal["axis", "pairwise", "layers"] = "axis",
-    allow_df: bool = True,
+    alignment: tuple[Literal["obs", "var"], ...] = (),
     io_key: str | None = None,
-) -> None:
-    """Register a new axis-aligned section on :class:`~anndata.AnnData`.
+) -> Callable[[type], type]:
+    """Register a new section on :class:`~anndata.AnnData`.
 
-    This allows external packages to add new mappings (like ``obsm``, ``layers``)
-    that participate in subsetting, IO, repr, and traversal without subclassing.
+    Decorator that creates a section from a class definition. The class
+    can optionally define methods and attributes to customize behavior.
 
     Parameters
     ----------
     name
         Attribute name on AnnData (e.g., ``"obst"``). Becomes ``adata.obst``.
-    axis
-        ``0`` for obs-aligned, ``1`` for var-aligned, ``None`` for both-axes
-        (layers-like).
-    mapping_type
-        ``"axis"`` for :class:`AxisArrays` (like obsm/varm),
-        ``"pairwise"`` for :class:`PairwiseArrays` (like obsp/varp),
-        ``"layers"`` for :class:`Layers`.
-    allow_df
-        Whether to allow DataFrames as values.
+    alignment
+        Tuple of axes each dimension is aligned to. Examples:
+        ``("obs",)`` for obs-aligned (like obsm),
+        ``("obs", "var")`` for both axes (like layers),
+        ``("obs", "obs")`` for pairwise (like obsp),
+        ``()`` for unaligned.
     io_key
         Key used in h5ad/zarr files. Defaults to *name*.
 
+    Class Attributes (all optional)
+    --------------------------------
+    value_type : type
+        Type check on assignment (e.g., ``nx.DiGraph``).
+    section_after : str
+        Position in repr (e.g., ``"obsm"``).
+    section_tooltip : str
+        Hover text in HTML repr.
+    section_doc_url : str
+        Documentation link in HTML repr.
+
+    Class Methods (all optional, must be static)
+    ---------------------------------------------
+    validate(key, value)
+        Custom validation on assignment. Raise on invalid.
+    subset(value, idx)
+        Custom subsetting for ``adata[idx]``. Default uses anndata's
+        ``_subset`` dispatch (works for arrays, sparse, DataFrames).
+    serialize(value)
+        Custom serialization for IO. Return a serializable object.
+    deserialize(data)
+        Custom deserialization for IO.
+    repr_entry(key, value, context)
+        Custom HTML repr formatting. Return ``FormattedOutput``.
+
     Examples
     --------
+    Simple axis-aligned section (arrays, no custom behavior):
+
     .. code-block:: python
 
-        import anndata as ad
-        from anndata.extensions import register_aligned_section
+        @register_section("obst", alignment=("obs",))
+        class ObstSection:
+            pass
 
-        # Register at import time
-        register_aligned_section("obst", axis=0, mapping_type="axis")
+    Full-featured section (TreeData-like):
 
-        adata = ad.AnnData(obs=pd.DataFrame(index=["c1", "c2", "c3"]))
-        adata.obst["lineage"] = np.eye(3)       # validates shape against n_obs
-        sub = adata[:2]                           # sub.obst["lineage"] is subsetted
-        adata.write("test.h5ad")                  # obst is written
-        adata2 = ad.read_h5ad("test.h5ad")        # obst is read back
+    .. code-block:: python
+
+        @register_section("obst", alignment=("obs",))
+        class ObstSection:
+            value_type = nx.DiGraph
+            section_after = "obsm"
+            section_tooltip = "Observation trees"
+
+            @staticmethod
+            def validate(key, value):
+                if not nx.is_tree(value):
+                    raise ValueError(f"{key} must be a tree")
+
+            @staticmethod
+            def subset(value, idx):
+                return subset_tree(value, idx)
+
+            @staticmethod
+            def serialize(value):
+                return digraph_to_json(value)
+
+            @staticmethod
+            def deserialize(data):
+                return json_to_digraph(data)
+
+    Unaligned section (SpatialData-like):
+
+    .. code-block:: python
+
+        @register_section("images", alignment=())
+        class ImagesSection:
+            value_type = MultiscaleImage
     """
-    from .aligned_mapping import (
-        AlignedMappingProperty,
-        AxisArrays,
-        Layers,
-        PairwiseArrays,
+
+    def decorator(cls: type) -> type:
+        if name in AnnData._registered_sections:
+            msg = f"Section {name!r} is already registered"
+            raise ValueError(msg)
+        if name in _reserved_namespaces:
+            msg = f"Cannot register section {name!r}: conflicts with existing AnnData attribute"
+            raise AttributeError(msg)
+
+        # Extract optional methods and attributes from the class
+        spec = SectionSpec(
+            name=name,
+            alignment=alignment,
+            io_key=io_key or name,
+            value_type=getattr(cls, "value_type", None),
+            validate_fn=getattr(cls, "validate", None),
+            subset_fn=getattr(cls, "subset", None),
+            serialize_fn=getattr(cls, "serialize", None),
+            deserialize_fn=getattr(cls, "deserialize", None),
+            repr_entry_fn=getattr(cls, "repr_entry", None),
+            section_after=getattr(cls, "section_after", None),
+            section_tooltip=getattr(cls, "section_tooltip", ""),
+            section_doc_url=getattr(cls, "section_doc_url", None),
+        )
+
+        # Create and attach the property descriptor
+        prop = SectionProperty(spec)
+        setattr(AnnData, name, prop)
+
+        # Register
+        AnnData._registered_sections[name] = spec
+        _reserved_namespaces.add(name)
+
+        # Auto-register SectionFormatter for HTML repr if repr metadata is present
+        if spec.section_after or spec.repr_entry_fn:
+            _create_section_repr_formatter(spec)
+
+        return cls
+
+    return decorator
+
+
+def _create_section_repr_formatter(spec: SectionSpec) -> None:
+    """Auto-register a SectionFormatter for a registered section."""
+    from anndata._repr.registry import (
+        FormattedEntry,
+        FormattedOutput,
+        FormatterContext,
+        SectionFormatter,
+        register_formatter,
     )
 
-    if name in AnnData._registered_sections:
-        msg = f"Section {name!r} is already registered"
-        raise ValueError(msg)
-    if name in _reserved_namespaces:
-        msg = f"Cannot register section {name!r}: conflicts with existing AnnData attribute"
-        raise AttributeError(msg)
+    class RegisteredSectionFormatter(SectionFormatter):
+        @property
+        def section_name(self) -> str:
+            return spec.name
 
-    # Select the right aligned mapping class
-    cls_map = {
-        "axis": AxisArrays,
-        "pairwise": PairwiseArrays,
-        "layers": Layers,
-    }
-    if mapping_type not in cls_map:
-        msg = f"Unknown mapping_type: {mapping_type!r}. Must be one of {list(cls_map)}"
-        raise ValueError(msg)
-    cls = cls_map[mapping_type]
+        @property
+        def after_section(self) -> str | None:
+            return spec.section_after
 
-    # Create and attach the property descriptor
-    prop = AlignedMappingProperty(name, cls, axis)
-    setattr(AnnData, name, prop)
+        @property
+        def tooltip(self) -> str:
+            return spec.section_tooltip
 
-    # Register in the class-level registry
-    reg = SectionRegistration(
-        name=name,
-        mapping_type=mapping_type,
-        axis=axis,
-        allow_df=allow_df,
-        io_key=io_key or name,
-    )
-    AnnData._registered_sections[name] = reg
-    _reserved_namespaces.add(name)
+        @property
+        def doc_url(self) -> str | None:
+            return spec.section_doc_url
+
+        def should_show(self, obj: AnnData) -> bool:
+            mapping = getattr(obj, spec.name, None)
+            return mapping is not None and len(mapping) > 0
+
+        def get_entries(
+            self, obj: AnnData, context: FormatterContext
+        ) -> list[FormattedEntry]:
+            mapping = getattr(obj, spec.name)
+            entries = []
+            for k in mapping:
+                if spec.repr_entry_fn is not None:
+                    output = spec.repr_entry_fn(k, mapping[k], context)
+                else:
+                    output = FormattedOutput(
+                        type_name=type(mapping[k]).__name__,
+                    )
+                entries.append(FormattedEntry(key=k, output=output))
+            return entries
+
+    RegisteredSectionFormatter.__name__ = f"{spec.name}SectionFormatter"
+    register_formatter(RegisteredSectionFormatter())

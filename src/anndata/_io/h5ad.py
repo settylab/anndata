@@ -102,12 +102,14 @@ def write_h5ad(
         write_elem(f, "layers", dict(adata.layers), dataset_kwargs=dataset_kwargs)
         write_elem(f, "uns", dict(adata.uns), dataset_kwargs=dataset_kwargs)
         # Write registered sections (e.g., obst, vart from extensions)
-        for sec_name, sec_info in adata._registered_sections.items():
+        for sec_name, spec in adata._registered_sections.items():
             mapping = getattr(adata, sec_name, None)
             if mapping is not None and len(mapping) > 0:
-                write_elem(
-                    f, sec_info.io_key, dict(mapping), dataset_kwargs=dataset_kwargs
-                )
+                if spec.serialize_fn is not None:
+                    data = {k: spec.serialize_fn(v) for k, v in mapping.items()}
+                else:
+                    data = dict(mapping)
+                write_elem(f, spec.io_key, data, dataset_kwargs=dataset_kwargs)
 
 
 def _write_x(
@@ -269,13 +271,22 @@ def read_h5ad(
 
         def callback(read_func, elem_name: str, elem: StorageType, iospec: IOSpec):
             if iospec.encoding_type == "anndata" or elem_name.endswith("/"):
-                return AnnData(**{
+                d = {
                     # This is covering up backwards compat in the anndata initializer
                     # In most cases we should be able to call `func(elen[k])` instead
                     k: read_dispatched(elem[k], callback)
                     for k in elem
                     if not k.startswith("raw.")
-                })
+                }
+                # Deserialize registered sections
+                for sec_name, spec in AnnData._registered_sections.items():
+                    if spec.io_key in d and spec.deserialize_fn is not None:
+                        data = d[spec.io_key]
+                        if isinstance(data, dict):
+                            d[spec.io_key] = {
+                                k: spec.deserialize_fn(v) for k, v in data.items()
+                            }
+                return AnnData(**d)
             elif elem_name.startswith("/raw."):
                 return None
             elif elem_name == "/X" and "X" in as_sparse:

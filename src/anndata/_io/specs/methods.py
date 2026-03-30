@@ -298,12 +298,14 @@ def write_anndata(
     _writer.write_elem(g, "uns", dict(adata.uns), dataset_kwargs=dataset_kwargs)
     _writer.write_elem(g, "raw", adata.raw, dataset_kwargs=dataset_kwargs)
     # Write registered sections (e.g., obst, vart from extensions)
-    for sec_name, sec_info in adata._registered_sections.items():
+    for sec_name, spec in adata._registered_sections.items():
         mapping = getattr(adata, sec_name, None)
         if mapping is not None and len(mapping) > 0:
-            _writer.write_elem(
-                g, sec_info.io_key, dict(mapping), dataset_kwargs=dataset_kwargs
-            )
+            if spec.serialize_fn is not None:
+                data = {k: spec.serialize_fn(v) for k, v in mapping.items()}
+            else:
+                data = dict(mapping)
+            _writer.write_elem(g, spec.io_key, data, dataset_kwargs=dataset_kwargs)
 
 
 @_REGISTRY.register_read(H5Group, IOSpec("anndata", "0.1.0"))
@@ -329,9 +331,12 @@ def read_anndata(elem: _GroupStorageType | H5File, *, _reader: Reader) -> AnnDat
         if k in elem:
             d[k] = _reader.read_elem(elem[k])
     # Read registered sections (e.g., obst, vart from extensions)
-    for sec_name, sec_info in AnnData._registered_sections.items():
-        if sec_info.io_key in elem:
-            d[sec_name] = _reader.read_elem(elem[sec_info.io_key])
+    for sec_name, spec in AnnData._registered_sections.items():
+        if spec.io_key in elem:
+            data = _reader.read_elem(elem[spec.io_key])
+            if spec.deserialize_fn is not None and isinstance(data, dict):
+                data = {k: spec.deserialize_fn(v) for k, v in data.items()}
+            d[sec_name] = data
     return AnnData(**d)
 
 
