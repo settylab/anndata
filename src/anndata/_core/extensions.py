@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 # Based off of the extension framework in Polars
 # https://github.com/pola-rs/polars/blob/main/py-polars/polars/api.py
 
-__all__ = ["register_anndata_namespace", "register_section", "SectionSpec"]
+__all__ = ["SectionSpec", "register_anndata_namespace", "register_section"]
 
 # Protocol for accessors that provide section visualization
 REPR_SECTION_METHOD = "_repr_section_"
@@ -548,7 +548,6 @@ def _create_section_repr_formatter(spec: SectionSpec) -> None:
     from anndata._repr.registry import (
         FormattedEntry,
         FormattedOutput,
-        FormatterContext,
         SectionFormatter,
         register_formatter,
     )

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, MutableMapping
 from copy import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from .views import view_update
@@ -109,9 +109,7 @@ class SectionMapping(MutableMapping):
     def _validate_alignment(self, key: str, value: Any) -> None:
         """Check that value dimensions match the expected axes."""
         for i, axis in enumerate(self._spec.alignment):
-            expected = (
-                self._parent.n_obs if axis == "obs" else self._parent.n_vars
-            )
+            expected = self._parent.n_obs if axis == "obs" else self._parent.n_vars
             actual = _axis_len(value, i)
             if actual is not None and actual != expected:
                 n_name = "n_obs" if axis == "obs" else "n_vars"
@@ -244,7 +242,9 @@ class SectionMappingView(Mapping):
 
     def copy(self) -> dict[str, Any]:
         """Copy with subsetting applied."""
-        return {k: self[k].copy() if hasattr(self[k], "copy") else self[k] for k in self}
+        return {
+            k: self[k].copy() if hasattr(self[k], "copy") else self[k] for k in self
+        }
 
 
 class SectionProperty:
@@ -269,18 +269,14 @@ class SectionProperty:
         # View: create subsetting view
         parent = obj._adata_ref
         parent_mapping = getattr(parent, self.spec.name)
-        return SectionMappingView(
-            parent_mapping, obj, obj._oidx, obj._vidx
-        )
+        return SectionMappingView(parent_mapping, obj, obj._oidx, obj._vidx)
 
-    def __set__(
-        self, obj: AnnData, value: Mapping[str, Any] | None
-    ) -> None:
+    def __set__(self, obj: AnnData, value: Mapping[str, Any] | None) -> None:
         if value is None:
             value = {}
-        if isinstance(value, (SectionMapping, SectionMappingView)):
-            value = dict(value)
-        elif isinstance(value, Mapping):
+        if isinstance(value, (SectionMapping, SectionMappingView)) or isinstance(
+            value, Mapping
+        ):
             value = dict(value)
         # Validate all values via SectionMapping
         mapping = SectionMapping(obj, self.spec, {})

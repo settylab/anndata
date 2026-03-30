@@ -79,10 +79,8 @@ anndata._repr : Full documentation of the HTML representation system
 from __future__ import annotations
 
 # Accessor registration (from PR #1870)
-from anndata._core.extensions import register_anndata_namespace
-
 # Section registration (pluggable sections with custom alignment, IO, validation)
-from anndata._core.extensions import register_section
+from anndata._core.extensions import register_anndata_namespace, register_section
 from anndata._core.section_registry import SectionSpec
 
 # HTML representation formatters

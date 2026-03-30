@@ -1430,7 +1430,16 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
             raise NotImplementedError(msg)
         new = {}
 
-        for key in ["obs", "var", "obsm", "varm", "obsp", "varp", "layers", *self._registered_sections]:
+        for key in [
+            "obs",
+            "var",
+            "obsm",
+            "varm",
+            "obsp",
+            "varp",
+            "layers",
+            *self._registered_sections,
+        ]:
             if key in kwargs:
                 new[key] = kwargs[key]
             else:

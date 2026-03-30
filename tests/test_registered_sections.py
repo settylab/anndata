@@ -19,7 +19,6 @@ from scipy.sparse import csr_matrix
 import anndata as ad
 from anndata.extensions import register_section
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: register sections once per test session
 # ---------------------------------------------------------------------------
@@ -103,6 +102,7 @@ def _register_test_sections():
         @register_section("cellcomm", alignment=("obs", "obs", "var"))
         class CellCommSection:
             """Ligand-receptor communication scores (sender × receiver × gene)."""
+
             section_after = "obsp"
             section_tooltip = "Cell-cell communication"
 
@@ -112,6 +112,7 @@ def _register_test_sections():
         @register_section("genereg", alignment=("obs", "var", "var"))
         class GeneRegSection:
             """Cell-specific gene regulatory networks (cell × gene × gene)."""
+
             section_after = "varp"
             section_tooltip = "Gene regulation per cell"
 
@@ -124,6 +125,19 @@ def _register_test_sections():
             def subset(value, idx):
                 # Custom: return a dict describing the subset
                 return {"original": value, "subset_idx": idx}
+
+    # Factored tensor: store rank-R factors, reconstruct on demand
+    if "comm_obs" not in ad.AnnData._registered_sections:
+
+        @register_section("comm_obs", alignment="obs")
+        class CommObs:
+            """Cell factor matrix (n_obs × rank) for communication tensor."""
+
+    if "comm_var" not in ad.AnnData._registered_sections:
+
+        @register_section("comm_var", alignment="var")
+        class CommVar:
+            """Gene factor matrix (n_vars × rank) for communication tensor."""
 
     # xarray layers (custom type with serialize/deserialize)
     if "xr_layers" not in ad.AnnData._registered_sections:
@@ -413,9 +427,7 @@ class TestH5adRoundtrip:
         path = tmp_path / "test.h5ad"
         adata.write(path)
         adata2 = ad.read_h5ad(path)
-        np.testing.assert_array_equal(
-            adata2.sec_both["x"], np.arange(15).reshape(5, 3)
-        )
+        np.testing.assert_array_equal(adata2.sec_both["x"], np.arange(15).reshape(5, 3))
 
     def test_empty_section_not_written(self, adata, tmp_path):
         import h5py
@@ -586,9 +598,7 @@ class TestCellCommunication:
         path = tmp_path / "comm.h5ad"
         adata.write(path)
         adata2 = ad.read_h5ad(path)
-        np.testing.assert_array_almost_equal(
-            adata2.cellcomm["lr_scores"], comm
-        )
+        np.testing.assert_array_almost_equal(adata2.cellcomm["lr_scores"], comm)
 
     def test_workflow(self, tmp_path):
         """End-to-end: simulate CellChat-like analysis."""
@@ -682,9 +692,129 @@ class TestGeneRegulation:
         path = tmp_path / "grn.h5ad"
         adata.write(path)
         adata2 = ad.read_h5ad(path)
-        np.testing.assert_array_almost_equal(
-            adata2.genereg["scenic"], grn
+        np.testing.assert_array_almost_equal(adata2.genereg["scenic"], grn)
+
+
+# ---------------------------------------------------------------------------
+# Factored tensor: sections + accessor (scalable communication analysis)
+# ---------------------------------------------------------------------------
+
+
+class TestFactoredTensor:
+    """Store rank-R factors in sections, reconstruct tensor via accessor.
+
+    For million-cell datasets, a dense (n_obs × n_obs × n_vars) tensor
+    is infeasible. Instead, store compact factors (n_obs × rank) and
+    (n_vars × rank), and reconstruct on demand. The factors subset
+    correctly, serialize to h5ad, and the accessor provides the tensor API.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _ensure_accessor(self):
+        """Create and register the accessor (idempotent)."""
+        if hasattr(ad.AnnData, "comm"):
+            return
+        from anndata.extensions import (
+            FormattedEntry,
+            FormattedOutput,
+            register_anndata_namespace,
         )
+
+        @register_anndata_namespace("comm")
+        class CellCommAccessor:
+            section_after = "obsp"
+            section_tooltip = "Cell-cell communication (factored)"
+
+            def __init__(self, adata: ad.AnnData):
+                self._adata = adata
+
+            def tensor(self, key="default"):
+                """Reconstruct (obs × obs × var) tensor from factors."""
+                U = self._adata.comm_obs[key]
+                V = self._adata.comm_var[key]
+                return np.einsum("ir,jr,kr->ijk", U, U, V)
+
+            def query(self, sender, receiver, gene, key="default"):
+                """O(rank) point query without materializing tensor."""
+                U = self._adata.comm_obs[key]
+                V = self._adata.comm_var[key]
+                i = self._adata.obs_names.get_loc(sender)
+                j = self._adata.obs_names.get_loc(receiver)
+                k = self._adata.var_names.get_loc(gene)
+                return float(U[i] @ (U[j] * V[k]))
+
+            def _repr_section_(self, context):
+                keys = list(self._adata.comm_obs.keys())
+                if not keys:
+                    return None
+                return [
+                    FormattedEntry(
+                        key=k,
+                        output=FormattedOutput(
+                            type_name=f"rank-{self._adata.comm_obs[k].shape[1]} factors",
+                            preview=(
+                                f"({self._adata.comm_obs[k].shape[0]} cells "
+                                f"× {self._adata.comm_var[k].shape[0]} genes)"
+                            ),
+                        ),
+                    )
+                    for k in keys
+                ]
+
+    def test_store_factors(self, adata):
+        n_obs, n_vars, rank = 5, 3, 2
+        adata.comm_obs["lr"] = np.random.rand(n_obs, rank)
+        adata.comm_var["lr"] = np.random.rand(n_vars, rank)
+        assert adata.comm_obs["lr"].shape == (n_obs, rank)
+        assert adata.comm_var["lr"].shape == (n_vars, rank)
+
+    def test_reconstruct_tensor(self, adata):
+        rank = 3
+        adata.comm_obs["lr"] = np.random.rand(5, rank)
+        adata.comm_var["lr"] = np.random.rand(3, rank)
+        tensor = adata.comm.tensor("lr")
+        assert tensor.shape == (5, 5, 3)
+
+    def test_point_query(self, adata):
+        rank = 3
+        U = np.random.rand(5, rank)
+        V = np.random.rand(3, rank)
+        adata.comm_obs["lr"] = U
+        adata.comm_var["lr"] = V
+        score = adata.comm.query("c0", "c1", "v0", "lr")
+        expected = float(U[0] @ (U[1] * V[0]))
+        assert abs(score - expected) < 1e-10
+
+    def test_subset_preserves_reconstruction(self, adata):
+        rank = 3
+        adata.comm_obs["lr"] = np.random.rand(5, rank)
+        adata.comm_var["lr"] = np.random.rand(3, rank)
+        full_tensor = adata.comm.tensor("lr")
+
+        sub = adata[:3, :2]
+        sub_tensor = sub.comm.tensor("lr")
+        assert sub_tensor.shape == (3, 3, 2)
+        np.testing.assert_array_almost_equal(sub_tensor, full_tensor[:3, :3, :2])
+
+    def test_io_roundtrip(self, adata, tmp_path):
+        rank = 3
+        adata.comm_obs["lr"] = np.random.rand(5, rank)
+        adata.comm_var["lr"] = np.random.rand(3, rank)
+        tensor_before = adata.comm.tensor("lr")
+
+        path = tmp_path / "factored.h5ad"
+        adata.write(path)
+        adata2 = ad.read_h5ad(path)
+        tensor_after = adata2.comm.tensor("lr")
+        np.testing.assert_array_almost_equal(tensor_before, tensor_after)
+
+    def test_compression_ratio(self):
+        """Factors are orders of magnitude smaller than dense tensor."""
+        n_obs, n_vars, rank = 1000, 500, 10
+        factor_bytes = (n_obs * rank + n_vars * rank) * 8  # float64
+        tensor_bytes = n_obs * n_obs * n_vars * 8
+        ratio = tensor_bytes / factor_bytes
+        assert ratio > 100  # ~33,000× for these sizes
 
 
 # ---------------------------------------------------------------------------
