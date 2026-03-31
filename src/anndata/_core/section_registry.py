@@ -7,12 +7,16 @@ packages add new sections to AnnData without subclassing.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping
 from copy import copy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING
 
 from .views import view_update
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+    from typing import Any, Literal
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -33,7 +37,8 @@ def _axis_len(value: Any, dim: int) -> int | None:
 class SectionSpec:
     """Complete specification for a registered section.
 
-    Created by :func:`register_section` from the decorated class.
+    Created by :func:`register_section` from the decorated class,
+    or internally for built-in sections.
     """
 
     name: str
@@ -42,6 +47,10 @@ class SectionSpec:
     """Axes each dimension is aligned to. Empty tuple for unaligned."""
     io_key: str
     """Key used in h5ad/zarr files."""
+    kind: Literal["X", "dataframe", "mapping", "unstructured", "raw"] = "mapping"
+    """Section category. Used by :func:`iter_sections` for filtering."""
+    builtin: bool = False
+    """Whether this is a built-in section (vs. registered by an extension)."""
 
     # Optional callbacks extracted from the section class
     value_type: type | None = None
@@ -274,9 +283,7 @@ class SectionProperty:
     def __set__(self, obj: AnnData, value: Mapping[str, Any] | None) -> None:
         if value is None:
             value = {}
-        if isinstance(value, (SectionMapping, SectionMappingView)) or isinstance(
-            value, Mapping
-        ):
+        if isinstance(value, (SectionMapping, SectionMappingView, Mapping)):
             value = dict(value)
         # Validate all values via SectionMapping
         mapping = SectionMapping(obj, self.spec, {})
@@ -288,3 +295,129 @@ class SectionProperty:
 
     def __delete__(self, obj: AnnData) -> None:
         setattr(obj, f"_{self.spec.name}", {})
+
+
+# ---------------------------------------------------------------------------
+# Built-in section specs (metadata only — the actual descriptors are
+# AlignedMappingProperty instances already on the AnnData class)
+# ---------------------------------------------------------------------------
+
+#: Ordered list of all built-in sections, used to seed ``_registered_sections``.
+BUILTIN_SECTIONS: list[SectionSpec] = [
+    SectionSpec(name="X", alignment=("obs", "var"), io_key="X", kind="X", builtin=True),
+    SectionSpec(
+        name="obs", alignment=("obs",), io_key="obs", kind="dataframe", builtin=True
+    ),
+    SectionSpec(
+        name="var", alignment=("var",), io_key="var", kind="dataframe", builtin=True
+    ),
+    SectionSpec(
+        name="uns", alignment=(), io_key="uns", kind="unstructured", builtin=True
+    ),
+    SectionSpec(
+        name="obsm", alignment=("obs",), io_key="obsm", kind="mapping", builtin=True
+    ),
+    SectionSpec(
+        name="varm", alignment=("var",), io_key="varm", kind="mapping", builtin=True
+    ),
+    SectionSpec(
+        name="layers",
+        alignment=("obs", "var"),
+        io_key="layers",
+        kind="mapping",
+        builtin=True,
+    ),
+    SectionSpec(
+        name="obsp",
+        alignment=("obs", "obs"),
+        io_key="obsp",
+        kind="mapping",
+        builtin=True,
+    ),
+    SectionSpec(
+        name="varp",
+        alignment=("var", "var"),
+        io_key="varp",
+        kind="mapping",
+        builtin=True,
+    ),
+    SectionSpec(name="raw", alignment=("obs",), io_key="raw", kind="raw", builtin=True),
+]
+
+
+def _init_builtin_sections(cls: type[AnnData]) -> None:
+    """Populate ``_registered_sections`` with built-in section specs.
+
+    Called once during AnnData class setup. Does NOT create descriptors —
+    the built-in ``AlignedMappingProperty`` instances are already on the class.
+    """
+    for spec in BUILTIN_SECTIONS:
+        cls._registered_sections[spec.name] = spec
+
+
+# ---------------------------------------------------------------------------
+# Section iteration utility
+# ---------------------------------------------------------------------------
+
+
+def iter_sections(
+    adata: AnnData,
+    *,
+    kinds: set[str] | None = None,
+    exclude_kinds: set[str] | None = None,
+    only_nonempty: bool = False,
+) -> Iterator[tuple[SectionSpec, Any]]:
+    """Iterate over AnnData sections with optional filtering.
+
+    Yields ``(spec, value)`` pairs for each section, where *value* is
+    the result of ``getattr(adata, spec.name)``.
+
+    Parameters
+    ----------
+    adata
+        AnnData to iterate over.
+    kinds
+        If given, only yield sections whose ``kind`` is in this set.
+        E.g., ``{"mapping"}`` for dict-like sections (obsm, layers, …).
+    exclude_kinds
+        If given, skip sections whose ``kind`` is in this set.
+        E.g., ``{"unstructured", "raw"}`` to skip uns and raw.
+    only_nonempty
+        If ``True``, skip sections that are empty or ``None``.
+
+    Examples
+    --------
+    All mapping sections (built-in + registered):
+
+    >>> for spec, mapping in iter_sections(adata, kinds={"mapping"}):
+    ...     print(spec.name, list(mapping.keys()))
+
+    Everything except uns and raw:
+
+    >>> for spec, value in iter_sections(adata, exclude_kinds={"unstructured", "raw"}):
+    ...     ...
+
+    Non-empty sections for repr:
+
+    >>> for spec, value in iter_sections(adata, only_nonempty=True):
+    ...     print(spec.name)
+    """
+    for spec in adata._registered_sections.values():
+        if kinds is not None and spec.kind not in kinds:
+            continue
+        if exclude_kinds is not None and spec.kind in exclude_kinds:
+            continue
+        try:
+            value = getattr(adata, spec.name, None)
+        except Exception:  # noqa: BLE001
+            # Crashing objects in aligned mappings (adversarial data)
+            continue
+        if only_nonempty:
+            if value is None:
+                continue
+            try:
+                if len(value) == 0:
+                    continue
+            except TypeError:
+                pass  # no len, treat as non-empty
+        yield spec, value

@@ -9,6 +9,7 @@ from .anndata import AnnData
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Literal
 
     from anndata._repr.registry import FormattedEntry, FormatterContext
 
@@ -396,10 +397,7 @@ def register_anndata_namespace[NameSpT: ExtensionNamespace](
 # Section registration
 # ---------------------------------------------------------------------------
 
-from collections.abc import Callable
-from typing import Literal
-
-from .section_registry import SectionProperty, SectionSpec
+from .section_registry import SectionProperty, SectionSpec  # noqa: E402
 
 
 def register_section(

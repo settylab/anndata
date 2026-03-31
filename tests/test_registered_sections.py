@@ -25,7 +25,7 @@ from anndata.extensions import register_section
 
 
 @pytest.fixture(autouse=True, scope="module")
-def _register_test_sections():
+def _register_test_sections():  # noqa: PLR0912
     """Register test sections for all alignment combinations."""
     # obs-aligned (like obsm)
     if "sec_obs" not in ad.AnnData._registered_sections:
@@ -181,7 +181,8 @@ class TestRegistrationAPI:
             register_section("sec_obs", alignment="obs")(type("Dup", (), {}))
 
     def test_register_reserved_name_raises(self):
-        with pytest.raises(AttributeError, match="conflicts with"):
+        # "obs" is a built-in registered section, so it's already registered
+        with pytest.raises(ValueError, match="already registered"):
             register_section("obs", alignment="obs")(type("Bad", (), {}))
 
     def test_all_sections_in_registry(self):

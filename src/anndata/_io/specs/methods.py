@@ -285,27 +285,25 @@ def write_anndata(
     _writer: Writer,
     dataset_kwargs: Mapping[str, Any] = MappingProxyType({}),
 ):
+    from anndata._core.section_registry import iter_sections
+
     g = f.require_group(k)
+    # X and raw need special handling
     if adata.X is not None:
         _writer.write_elem(g, "X", adata.X, dataset_kwargs=dataset_kwargs)
-    _writer.write_elem(g, "obs", adata.obs, dataset_kwargs=dataset_kwargs)
-    _writer.write_elem(g, "var", adata.var, dataset_kwargs=dataset_kwargs)
-    _writer.write_elem(g, "obsm", dict(adata.obsm), dataset_kwargs=dataset_kwargs)
-    _writer.write_elem(g, "varm", dict(adata.varm), dataset_kwargs=dataset_kwargs)
-    _writer.write_elem(g, "obsp", dict(adata.obsp), dataset_kwargs=dataset_kwargs)
-    _writer.write_elem(g, "varp", dict(adata.varp), dataset_kwargs=dataset_kwargs)
-    _writer.write_elem(g, "layers", dict(adata.layers), dataset_kwargs=dataset_kwargs)
-    _writer.write_elem(g, "uns", dict(adata.uns), dataset_kwargs=dataset_kwargs)
     _writer.write_elem(g, "raw", adata.raw, dataset_kwargs=dataset_kwargs)
-    # Write registered sections (e.g., obst, vart from extensions)
-    for sec_name, spec in adata._registered_sections.items():
-        mapping = getattr(adata, sec_name, None)
-        if mapping is not None and len(mapping) > 0:
-            if spec.serialize_fn is not None:
-                data = {k: spec.serialize_fn(v) for k, v in mapping.items()}
-            else:
-                data = dict(mapping)
-            _writer.write_elem(g, spec.io_key, data, dataset_kwargs=dataset_kwargs)
+    # All other sections via the unified registry
+    for spec, value in iter_sections(adata, exclude_kinds={"X", "raw"}):
+        # Skip empty mappings (but always write DataFrames — they carry the index)
+        if spec.kind != "dataframe" and len(value) == 0:
+            continue
+        if spec.serialize_fn is not None:
+            data = {k: spec.serialize_fn(v) for k, v in value.items()}
+        elif spec.kind == "dataframe":
+            data = value  # write DataFrame directly
+        else:
+            data = dict(value)  # mappings and uns → dict
+        _writer.write_elem(g, spec.io_key, data, dataset_kwargs=dataset_kwargs)
 
 
 @_REGISTRY.register_read(H5Group, IOSpec("anndata", "0.1.0"))
@@ -316,27 +314,12 @@ def write_anndata(
 @_REGISTRY.register_read(ZarrGroup, IOSpec("raw", "0.1.0"))
 def read_anndata(elem: _GroupStorageType | H5File, *, _reader: Reader) -> AnnData:
     d = {}
-    for k in [
-        "X",
-        "obs",
-        "var",
-        "obsm",
-        "varm",
-        "obsp",
-        "varp",
-        "layers",
-        "uns",
-        "raw",
-    ]:
-        if k in elem:
-            d[k] = _reader.read_elem(elem[k])
-    # Read registered sections (e.g., obst, vart from extensions)
-    for sec_name, spec in AnnData._registered_sections.items():
+    for spec in AnnData._registered_sections.values():
         if spec.io_key in elem:
             data = _reader.read_elem(elem[spec.io_key])
             if spec.deserialize_fn is not None and isinstance(data, dict):
                 data = {k: spec.deserialize_fn(v) for k, v in data.items()}
-            d[sec_name] = data
+            d[spec.name] = data
     return AnnData(**d)
 
 

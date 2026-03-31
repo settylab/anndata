@@ -395,8 +395,11 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
                 if any((obs, var, uns, obsm, varm, obsp, varp)):
                     msg = "If `X` is a dict no further arguments must be provided."
                     raise ValueError(msg)
-                # Copy registered sections from source AnnData
-                for sec_name in self._registered_sections:
+                # Copy extension sections from source AnnData
+                # (built-in sections are handled by the explicit unpacking below)
+                for sec_name, spec in self._registered_sections.items():
+                    if spec.builtin:
+                        continue
                     if sec_name not in extra_sections:
                         src_mapping = getattr(X, sec_name, None)
                         if src_mapping is not None and len(src_mapping) > 0:
@@ -561,22 +564,17 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
         return sum(sizes.values())
 
     def _gen_repr(self, n_obs, n_vars) -> str:
+        from .section_registry import iter_sections
+
         backed_at = f" backed at {str(self.filename)!r}" if self.isbacked else ""
         descr = f"AnnData object with n_obs × n_vars = {n_obs} × {n_vars}{backed_at}"
-        for attr in [
-            "obs",
-            "var",
-            "uns",
-            "obsm",
-            "varm",
-            "layers",
-            "obsp",
-            "varp",
-            *self._registered_sections,
-        ]:
-            keys = getattr(self, attr).keys()
+        for spec, value in iter_sections(self, exclude_kinds={"X", "raw"}):
+            try:
+                keys = value.keys()
+            except Exception:  # noqa: BLE001
+                continue
             if len(keys) > 0:
-                descr += f"\n    {attr}: {str(list(keys))[1:-1]}"
+                descr += f"\n    {spec.name}: {str(list(keys))[1:-1]}"
         return descr
 
     def __repr__(self) -> str:
@@ -1430,20 +1428,13 @@ class AnnData(metaclass=utils.DeprecationMixinMeta):  # noqa: PLW1641
             raise NotImplementedError(msg)
         new = {}
 
-        for key in [
-            "obs",
-            "var",
-            "obsm",
-            "varm",
-            "obsp",
-            "varp",
-            "layers",
-            *self._registered_sections,
-        ]:
-            if key in kwargs:
-                new[key] = kwargs[key]
+        from .section_registry import iter_sections
+
+        for spec, value in iter_sections(self, kinds={"dataframe", "mapping"}):
+            if spec.name in kwargs:
+                new[spec.name] = kwargs[spec.name]
             else:
-                new[key] = getattr(self, key).copy()
+                new[spec.name] = value.copy()
         if "X" in kwargs:
             new["X"] = kwargs["X"]
         elif self._has_X():
@@ -2178,6 +2169,13 @@ def _remove_unused_categories_xr(
     df_full: Dataset2D, df_sub: Dataset2D, uns: dict[str, Any]
 ):
     pass  # this is handled automatically by the categorical arrays themselves i.e., they dedup upon access.
+
+
+# Populate _registered_sections with built-in section specs.
+# Must happen after AnnData class definition is complete.
+from .section_registry import _init_builtin_sections  # noqa: E402
+
+_init_builtin_sections(AnnData)
 
 
 def _check_2d_shape(X):
