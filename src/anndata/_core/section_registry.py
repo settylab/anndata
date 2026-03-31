@@ -341,7 +341,7 @@ BUILTIN_SECTIONS: list[SectionSpec] = [
         kind="mapping",
         builtin=True,
     ),
-    SectionSpec(name="raw", alignment=("obs",), io_key="raw", kind="raw", builtin=True),
+    SectionSpec(name="raw", alignment=(), io_key="raw", kind="raw", builtin=True),
 ]
 
 
