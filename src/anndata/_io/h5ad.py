@@ -93,14 +93,21 @@ def write_h5ad(
             dataset_kwargs=dataset_kwargs,
         )
         _write_raw(f, adata.raw, as_dense=as_dense, dataset_kwargs=dataset_kwargs)
-        write_elem(f, "obs", adata.obs, dataset_kwargs=dataset_kwargs)
-        write_elem(f, "var", adata.var, dataset_kwargs=dataset_kwargs)
-        write_elem(f, "obsm", dict(adata.obsm), dataset_kwargs=dataset_kwargs)
-        write_elem(f, "varm", dict(adata.varm), dataset_kwargs=dataset_kwargs)
-        write_elem(f, "obsp", dict(adata.obsp), dataset_kwargs=dataset_kwargs)
-        write_elem(f, "varp", dict(adata.varp), dataset_kwargs=dataset_kwargs)
-        write_elem(f, "layers", dict(adata.layers), dataset_kwargs=dataset_kwargs)
-        write_elem(f, "uns", dict(adata.uns), dataset_kwargs=dataset_kwargs)
+
+        # Write all non-X/raw sections via the unified registry
+        from anndata._core.section_registry import iter_sections
+
+        for spec, value in iter_sections(adata, exclude_kinds={"X", "raw"}):
+            # Skip empty mappings (but always write DataFrames — they carry the index)
+            if spec.kind != "dataframe" and len(value) == 0:
+                continue
+            if spec.serialize_fn is not None:
+                data = {k: spec.serialize_fn(v) for k, v in value.items()}
+            elif spec.kind == "dataframe":
+                data = value  # write DataFrame directly
+            else:
+                data = dict(value)  # mappings and uns → dict
+            write_elem(f, spec.io_key, data, dataset_kwargs=dataset_kwargs)
 
 
 def _write_x(
@@ -262,13 +269,22 @@ def read_h5ad(
 
         def callback(read_func, elem_name: str, elem: StorageType, iospec: IOSpec):
             if iospec.encoding_type == "anndata" or elem_name.endswith("/"):
-                return AnnData(**{
+                d = {
                     # This is covering up backwards compat in the anndata initializer
                     # In most cases we should be able to call `func(elen[k])` instead
                     k: read_dispatched(elem[k], callback)
                     for k in elem
                     if not k.startswith("raw.")
-                })
+                }
+                # Deserialize registered sections
+                for spec in AnnData._registered_sections.values():
+                    if spec.io_key in d and spec.deserialize_fn is not None:
+                        data = d[spec.io_key]
+                        if isinstance(data, dict):
+                            d[spec.io_key] = {
+                                k: spec.deserialize_fn(v) for k, v in data.items()
+                            }
+                return AnnData(**d)
             elif elem_name.startswith("/raw."):
                 return None
             elif elem_name == "/X" and "X" in as_sparse:

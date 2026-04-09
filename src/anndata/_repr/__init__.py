@@ -54,6 +54,18 @@ This module provides an extensible HTML representation system with:
 - Support for nested AnnData objects
 - Graceful handling of unknown types
 
+.. note::
+
+    For extending AnnData with custom formatters, prefer importing from
+    :mod:`anndata.extensions` which provides the public API::
+
+        from anndata.extensions import (
+            register_formatter,
+            TypeFormatter,
+            SectionFormatter,
+            FormattedOutput,
+        )
+
 Extensibility
 -------------
 The system is designed to be extensible via two registry patterns:
@@ -68,7 +80,11 @@ The system is designed to be extensible via two registry patterns:
 
     Example - format by Python type::
 
-        from anndata._repr import register_formatter, TypeFormatter, FormattedOutput
+        from anndata.extensions import (
+            register_formatter,
+            TypeFormatter,
+            FormattedOutput,
+        )
 
 
         @register_formatter
@@ -101,8 +117,12 @@ The system is designed to be extensible via two registry patterns:
 
     Example - format by embedded type hint (for tagged data in uns)::
 
-        from anndata._repr import register_formatter, TypeFormatter, FormattedOutput
-        from anndata._repr import extract_uns_type_hint
+        from anndata.extensions import (
+            register_formatter,
+            TypeFormatter,
+            FormattedOutput,
+            extract_uns_type_hint,
+        )
 
 
         @register_formatter
@@ -150,8 +170,12 @@ The system is designed to be extensible via two registry patterns:
 
     Example::
 
-        from anndata._repr import register_formatter, SectionFormatter
-        from anndata._repr import FormattedEntry, FormattedOutput
+        from anndata.extensions import (
+            register_formatter,
+            SectionFormatter,
+            FormattedEntry,
+            FormattedOutput,
+        )
 
 
         @register_formatter
