@@ -431,12 +431,17 @@ if (readmeIcon) {
         closeBtn.setAttribute("aria-label", "Close");
         header.appendChild(closeBtn);
 
-        // Content — plain text (no markdown parsing, XSS-safe via textContent)
+        // Content — rendered markdown (innerHTML) or plain text (textContent)
         const content = document.createElement("div");
         content.className = "anndata-readme__content";
-        const pre = document.createElement("pre");
-        pre.textContent = readmeContent;
-        content.appendChild(pre);
+        const readmeFormat = readmeIcon.dataset.readmeFormat;
+        if (readmeFormat === "html") {
+            content.innerHTML = readmeContent;
+        } else {
+            const pre = document.createElement("pre");
+            pre.textContent = readmeContent;
+            content.appendChild(pre);
+        }
 
         modal.appendChild(header);
         modal.appendChild(content);

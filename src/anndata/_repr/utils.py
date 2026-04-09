@@ -556,6 +556,40 @@ def escape_html(text: str) -> str:
     return html.escape(str(text).replace("\x00", "\ufffd"))
 
 
+def render_markdown(text: str) -> str | None:
+    """Render markdown to HTML using any available renderer.
+
+    Tries common markdown libraries in order of likelihood to be installed
+    in a Jupyter environment. Returns ``None`` if no renderer is available,
+    signaling that the caller should fall back to plain text.
+
+    Raw HTML in the markdown source is escaped by each renderer to prevent
+    XSS (e.g. ``<script>`` tags become ``&lt;script&gt;`` in the output).
+    """
+    # markdown-it-py: dependency of rich (pip, hatch, many CLI tools)
+    try:
+        from markdown_it import MarkdownIt
+
+        # html=False escapes raw HTML tags in the source;
+        # enable table and strikethrough for GitHub-flavored markdown
+        md = MarkdownIt("commonmark", {"html": False})
+        md.enable("table")
+        md.enable("strikethrough")
+        return md.render(text)
+    except ImportError:
+        pass
+
+    # mistune: dependency of nbconvert (Jupyter)
+    try:
+        import mistune
+
+        return mistune.create_markdown(escape=True)(text)
+    except ImportError:
+        pass
+
+    return None
+
+
 def sanitize_for_id(text: str) -> str:
     """Sanitize a string for use as an HTML id attribute."""
     # Replace non-alphanumeric chars with underscore
