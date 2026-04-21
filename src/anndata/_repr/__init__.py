@@ -284,7 +284,7 @@ their own ``_repr_html_``, you can reuse anndata's CSS, JavaScript, and helpers.
         parts.append(
             render_section(
                 "items",
-                "\\n".join(entries),
+                Markup("\\n").join(entries),
                 n_items=len(self.items),
             )
         )

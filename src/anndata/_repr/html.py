@@ -488,10 +488,9 @@ def _render_custom_section(
             break
         rows.append(render_formatted_entry(entry, section_name))
 
-    # Use render_section for consistent structure
     return render_section(
         getattr(formatter, "display_name", section_name),
-        "\n".join(rows),
+        Markup("\n").join(rows),
         n_items=n_items,
         doc_url=getattr(formatter, "doc_url", None),
         tooltip=getattr(formatter, "tooltip", ""),

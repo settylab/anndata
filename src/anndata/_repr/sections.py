@@ -143,7 +143,7 @@ def _render_dataframe_section(
 
     return render_section(
         section,
-        "\n".join(rows),
+        Markup("\n").join(rows),
         n_items=n_cols,
         doc_url=doc_url,
         tooltip=tooltip,
@@ -192,7 +192,7 @@ def _render_mapping_section(
 
     return render_section(
         section,
-        "\n".join(rows),
+        Markup("\n").join(rows),
         n_items=n_items,
         doc_url=doc_url,
         tooltip=tooltip,
@@ -231,7 +231,7 @@ def _render_uns_section(
 
     return render_section(
         "uns",
-        "\n".join(rows),
+        Markup("\n").join(rows),
         n_items=n_items,
         doc_url=doc_url,
         tooltip=tooltip,

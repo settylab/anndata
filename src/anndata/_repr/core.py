@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 def render_section(  # noqa: PLR0913
     name: str,
-    entries_html: str | Markup,
+    entries: Markup,
     *,
     n_items: int,
     doc_url: str | None = None,
@@ -50,9 +50,10 @@ def render_section(  # noqa: PLR0913
     ----------
     name
         Display name for the section header (e.g., 'images', 'tables')
-    entries_html
-        HTML content for the section body (table rows). ``Markup`` passes
-        through; ``str`` is escaped.
+    entries
+        Trusted HTML (``markupsafe.Markup``) for the section body.
+        Typically produced by joining per-entry ``Markup`` values,
+        e.g. ``Markup("\\n").join(render_formatted_entry(e) for e in entries)``.
     n_items
         Number of items (used for empty check and default count string)
     doc_url
@@ -74,6 +75,8 @@ def render_section(  # noqa: PLR0913
     --------
     ::
 
+        from markupsafe import Markup
+
         from anndata._repr import (
             CSS_DTYPE_NDARRAY,
             FormattedEntry,
@@ -82,19 +85,21 @@ def render_section(  # noqa: PLR0913
             render_section,
         )
 
-        rows = []
-        for key, info in items.items():
-            entry = FormattedEntry(
-                key=key,
-                output=FormattedOutput(
-                    type_name=info["type"], css_class=CSS_DTYPE_NDARRAY
-                ),
+        rows = [
+            render_formatted_entry(
+                FormattedEntry(
+                    key=key,
+                    output=FormattedOutput(
+                        type_name=info["type"], css_class=CSS_DTYPE_NDARRAY
+                    ),
+                )
             )
-            rows.append(render_formatted_entry(entry))
+            for key, info in items.items()
+        ]
 
         html = render_section(
             "images",
-            "\\n".join(rows),
+            Markup("\\n").join(rows),
             n_items=len(items),
             doc_url="https://docs.example.com/images",
             tooltip="Image data",
@@ -105,11 +110,7 @@ def render_section(  # noqa: PLR0913
     if count_str is None:
         count_str = f"({n_items} items)"
 
-    # Callers that produced HTML as plain ``str`` (legacy path) are implicitly
-    # trusted; ``Markup``-typed input passes through unchanged.
-    entries = entries_html if isinstance(entries_html, Markup) else Markup(entries_html)
-
-    rendered = (
+    return Markup(
         get_env()
         .get_template("section.j2")
         .render(
@@ -123,7 +124,6 @@ def render_section(  # noqa: PLR0913
             entries=entries,
         )
     )
-    return Markup(rendered)
 
 
 def render_empty_section(
@@ -132,7 +132,7 @@ def render_empty_section(
     tooltip: str = "",
 ) -> Markup:
     """Render an empty section indicator."""
-    return render_section(name, "", n_items=0, doc_url=doc_url, tooltip=tooltip)
+    return render_section(name, Markup(""), n_items=0, doc_url=doc_url, tooltip=tooltip)
 
 
 def render_truncation_indicator(remaining: int) -> Markup:
