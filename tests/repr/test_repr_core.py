@@ -921,9 +921,8 @@ class TestPublicAPIExports:
 
     def test_utility_exports(self):
         """Test utility functions are exported."""
-        from anndata._repr import escape_html, format_memory_size, format_number
+        from anndata._repr import format_memory_size, format_number
 
-        assert escape_html("<test>") == "&lt;test&gt;"
         assert "KB" in format_memory_size(1024)
         assert format_number(1000) == "1,000"
 

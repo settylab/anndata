@@ -11,7 +11,6 @@ between html.py and sections.py.
 
 from __future__ import annotations
 
-from functools import cache
 from typing import TYPE_CHECKING
 
 from markupsafe import Markup
@@ -19,20 +18,13 @@ from markupsafe import Markup
 from .._repr_constants import (
     CSS_DTYPE_CATEGORY,
     CSS_DTYPE_DATAFRAME,
-    CSS_TEXT_ERROR,
-    CSS_TEXT_MUTED,
 )
-from .environment import get_env
+from .environment import get_env, get_macros
 from .registry import formatter_registry
 from .utils import format_number
 
 if TYPE_CHECKING:
     from .registry import FormattedEntry, FormatterContext
-
-
-@cache
-def _macros():
-    return get_env().get_template("_macros.j2").module
 
 
 def render_section(  # noqa: PLR0913
@@ -145,7 +137,7 @@ def render_empty_section(
 
 def render_truncation_indicator(remaining: int) -> Markup:
     """Render a truncation indicator."""
-    return Markup(_macros().truncation_indicator(format_number(remaining)))
+    return Markup(get_macros().truncation_indicator(format_number(remaining)))
 
 
 def get_section_tooltip(section: str) -> str:
@@ -170,43 +162,39 @@ def render_x_entry(obj: object, context: FormatterContext) -> Markup:
     Works with AnnData, Raw, and any object with an X attribute.
     Handles missing or broken X attributes gracefully.
     """
-    parts: list[Markup] = [
-        Markup('<div class="anndata-x__entry">'),
-        Markup("<span>X</span>"),
-    ]
+    state = "ok"
+    type_name = ""
+    css_class = ""
+    error_msg = ""
 
     try:
         X = obj.X
     except Exception as e:  # noqa: BLE001
+        state = "attribute_error"
         error_msg = f"error: {type(e).__name__}"
-        parts.append(
-            Markup('<span class="{}"><em>({})</em></span>').format(
-                CSS_TEXT_MUTED, error_msg
-            )
-        )
-        parts.append(Markup("</div>"))
-        return Markup("\n").join(parts)
-
-    if X is None:
-        parts.append(Markup("<span><em>None</em></span>"))
     else:
-        try:
-            output = formatter_registry.format_value(X, context)
-            parts.append(
-                Markup('<span class="{}">{}</span>').format(
-                    output.css_class, output.type_name
-                )
-            )
-        except Exception as e:  # noqa: BLE001
-            error_msg = f"error formatting: {type(e).__name__}"
-            parts.append(
-                Markup('<span class="{}"><em>({})</em></span>').format(
-                    CSS_TEXT_MUTED, error_msg
-                )
-            )
+        if X is None:
+            state = "none"
+        else:
+            try:
+                output = formatter_registry.format_value(X, context)
+                type_name = output.type_name
+                css_class = output.css_class
+            except Exception as e:  # noqa: BLE001
+                state = "format_error"
+                error_msg = f"error formatting: {type(e).__name__}"
 
-    parts.append(Markup("</div>"))
-    return Markup("\n").join(parts)
+    return Markup(
+        get_env()
+        .get_template("x_entry.j2")
+        .render(
+            x_label="X",
+            state=state,
+            type_name=type_name,
+            css_class=css_class,
+            error_msg=error_msg,
+        )
+    )
 
 
 def render_formatted_entry(
@@ -314,9 +302,7 @@ def render_formatted_entry(
     preview_markup = output.preview_markup
     preview_text = output.preview
     if output.error and not preview_markup:
-        preview_markup = Markup('<span class="{}">{}</span>').format(
-            CSS_TEXT_ERROR, output.error
-        )
+        preview_markup = Markup(get_macros().error_preview(output.error))
 
     if preview_note and preview_text:
         preview_text = f"{preview_note} {preview_text}"

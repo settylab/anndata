@@ -50,7 +50,6 @@ from anndata import AnnData  # noqa: E402
 from anndata._repr import (  # noqa: E402
     FormattedOutput,
     TypeFormatter,
-    escape_html,
     extract_uns_type_hint,
     register_formatter,
 )
@@ -277,7 +276,7 @@ try:
 
         Renders like the X entry — a single non-foldable line showing
         key=value pairs for label, alignment, and allow_overlap.
-        All values are escaped via ``escape_html(repr(val))``.
+        All values are escaped via ``Markup(...).format(...)``.
         """
 
         @property
@@ -322,9 +321,7 @@ try:
 
         def render_html(self, obj, context: FormatterContext) -> Markup:
             """Render as a compact line instead of a foldable section."""
-            from anndata._repr.utils import escape_html
-
-            pairs = []
+            pairs: list[Markup] = []
             for attr, label in [
                 ("_tree_label", "label"),
                 ("_alignment", "alignment"),
@@ -333,16 +330,17 @@ try:
                 val = getattr(obj, attr, None)
                 if val is not None:
                     pairs.append(
-                        f'<span style="color:var(--anndata-text-secondary,#6c757d);">{label}=</span>'
-                        f"{escape_html(repr(val))}"
+                        Markup(
+                            '<span style="color:var(--anndata-text-secondary,#6c757d);">{label}=</span>{val}'
+                        ).format(label=label, val=repr(val))
                     )
-            summary = " &nbsp; ".join(pairs)
+            summary = Markup(" &nbsp; ").join(pairs)
             return Markup(
                 '<div class="anndata-x__entry">'
-                f"<span>tree</span>"
-                f"<span>{summary}</span>"
+                "<span>tree</span>"
+                "<span>{summary}</span>"
                 "</div>"
-            )
+            ).format(summary=summary)
 
 except (ImportError, AttributeError):
     # AttributeError can occur on Python 3.14+ with incompatible networkx versions
@@ -470,7 +468,6 @@ try:
         FormatterRegistry,
         SectionFormatter,
         TypeFormatter,
-        escape_html,
         format_number,
         get_css,
         get_javascript,
@@ -576,9 +573,11 @@ try:
                     )
                 )
                 parts.append(
-                    f'<span class="anndata-file-path" style="font-family:ui-monospace,monospace;'
-                    f'font-size:11px;color:var(--anndata-text-secondary, #6c757d);">'
-                    f"{escape_html(self.path)}</span>"
+                    Markup(
+                        '<span class="anndata-file-path" style="font-family:ui-monospace,monospace;'
+                        'font-size:11px;color:var(--anndata-text-secondary, #6c757d);">'
+                        "{path}</span>"
+                    ).format(path=self.path)
                 )
 
             # Search box using render_search_box() helper
@@ -621,10 +620,12 @@ try:
             for cs_name in self.coordinate_systems:
                 tooltip = f"Elements: {elements_str}"
                 cs_parts.append(
-                    f'<span title="{escape_html(tooltip)}" style="'
-                    f"font-family:ui-monospace,monospace;font-size:11px;"
-                    f'color:var(--anndata-accent, #0d6efd);cursor:help;">'
-                    f"'{escape_html(cs_name)}'</span>"
+                    Markup(
+                        '<span title="{tooltip}" style="'
+                        "font-family:ui-monospace,monospace;font-size:11px;"
+                        'color:var(--anndata-accent, #0d6efd);cursor:help;">'
+                        "'{cs_name}'</span>"
+                    ).format(tooltip=tooltip, cs_name=cs_name)
                 )
 
             parts.append(", ".join(cs_parts))
@@ -3243,24 +3244,27 @@ Size bomb below (50KB):
 
             # Build preview with validation status
             categories = list(obj.cat.categories[:5])
+            cat_spans = [
+                Markup(
+                    '<span style="color: var(--anndata-category-color, #666);">{}</span>'
+                ).format(str(c))
+                for c in categories
+            ]
+            cat_html = Markup(", ").join(cat_spans)
+            if n_cats > 5:
+                cat_html += Markup(' <span style="color: #888;">...+{}</span>').format(
+                    n_cats - 5
+                )
             if validated:
                 # All values mapped - show green checkmark
-                cat_html = ", ".join(
-                    f'<span style="color: var(--anndata-category-color, #666);">{escape_html(str(c))}</span>'
-                    for c in categories
+                cat_html += Markup(
+                    ' <span style="color: #28a745;" title="All values validated">✓</span>'
                 )
-                if n_cats > 5:
-                    cat_html += f' <span style="color: #888;">...+{n_cats - 5}</span>'
-                cat_html += ' <span style="color: #28a745;" title="All values validated">✓</span>'
             else:
                 # Some unmapped values - show warning
-                cat_html = ", ".join(
-                    f'<span style="color: var(--anndata-category-color, #666);">{escape_html(str(c))}</span>'
-                    for c in categories
-                )
-                if n_cats > 5:
-                    cat_html += f' <span style="color: #888;">...+{n_cats - 5}</span>'
-                cat_html += f' <span style="color: #fd7e14;" title="{unmapped_count} unmapped values">⚠ {unmapped_count} unmapped</span>'
+                cat_html += Markup(
+                    ' <span style="color: #fd7e14;" title="{n} unmapped values">⚠ {n} unmapped</span>'
+                ).format(n=unmapped_count)
 
             # Build tooltip with full metadata
             tooltip_parts = [f"Registry: {registry}"]

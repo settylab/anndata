@@ -5,13 +5,12 @@ This module provides:
 - Serialization checking using the anndata IO registry
 - String-to-category warning detection
 - Color list detection and validation
-- HTML escaping and sanitization
+- Id sanitization
 - Memory size formatting
 """
 
 from __future__ import annotations
 
-import html
 import re
 from typing import TYPE_CHECKING
 
@@ -547,16 +546,6 @@ def format_index_preview(index: pd.Index, preview_n: int = 5) -> Markup:
         ]
 
     return Markup(", ").join(items)
-
-
-def escape_html(text: str) -> str:
-    """Escape HTML special characters and replace null bytes.
-
-    Null bytes in user data (e.g., column names like ``"null\\x00byte"``)
-    break HTML parsers and cause truncated rendering. They are replaced
-    with the Unicode replacement character U+FFFD.
-    """
-    return html.escape(str(text).replace("\x00", "\ufffd"))
 
 
 def sanitize_for_id(text: str) -> str:

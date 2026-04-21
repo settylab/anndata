@@ -330,7 +330,6 @@ from .._repr_constants import (
     DEFAULT_PREVIEW_ITEMS,
     DEFAULT_TYPE_WIDTH,
     DEFAULT_UNIQUE_LIMIT,
-    NOT_SERIALIZABLE_MSG,
 )
 
 # Documentation base URL
@@ -354,10 +353,6 @@ def get_section_doc_url(section: str) -> str:
     """
     return f"{DOCS_BASE_URL}generated/anndata.AnnData.{section}.html"
 
-
-# Import main functionality
-# Inline styles for graceful degradation (from single source of truth)
-from .._repr_constants import STYLE_HIDDEN  # noqa: E402
 
 # Building blocks for packages that want to create their own _repr_html_
 # These allow reusing anndata's styling while building custom representations
@@ -393,7 +388,6 @@ from .registry import (  # noqa: E402
 
 # HTML rendering helpers for building custom sections
 from .utils import (  # noqa: E402
-    escape_html,
     format_memory_size,
     format_number,
     validate_key,
@@ -411,9 +405,6 @@ __all__ = [  # noqa: RUF022  # organized by category, not alphabetically
     "DEFAULT_UNIQUE_LIMIT",
     "DEFAULT_MAX_FIELD_WIDTH",
     "DEFAULT_TYPE_WIDTH",
-    "DOCS_BASE_URL",
-    "get_section_doc_url",
-    "NOT_SERIALIZABLE_MSG",
     # CSS dtype constants for custom formatters
     "CSS_DTYPE_NDARRAY",
     "CSS_DTYPE_ANNDATA",
@@ -434,12 +425,10 @@ __all__ = [  # noqa: RUF022  # organized by category, not alphabetically
     # Building blocks for custom _repr_html_ implementations
     "get_css",
     "get_javascript",
-    "escape_html",
     "format_number",
     "format_memory_size",
     "render_section",
     "render_formatted_entry",
-    "STYLE_HIDDEN",
     # UI component helpers
     "render_search_box",
     "render_copy_button",

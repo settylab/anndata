@@ -16,18 +16,12 @@ build compatible representations.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from functools import cache
 
 from markupsafe import Markup
 
-from .._repr_constants import CSS_ENTRY, STYLE_HIDDEN
-from .environment import get_env
+from .._repr_constants import CSS_ENTRY
+from .environment import get_macros
 from .utils import sanitize_css_color
-
-
-@cache
-def _macros():
-    return get_env().get_template("_macros.j2").module
 
 
 def render_entry_row_open(
@@ -72,7 +66,7 @@ def render_entry_row_open(
     if is_error:
         classes.append("error")
     css_class = " ".join(classes)
-    return Markup(_macros().row_open(key, dtype, css_class, has_expandable_content))
+    return Markup(get_macros().row_open(key, dtype, css_class, has_expandable_content))
 
 
 def render_warning_icon(
@@ -91,7 +85,7 @@ def render_warning_icon(
     -------
     ``Markup`` HTML for warning icon, or empty ``Markup`` if no warnings.
     """
-    return Markup(_macros().warning_icon(warnings or [], is_not_serializable))
+    return Markup(get_macros().warning_icon(warnings or [], is_not_serializable))
 
 
 def render_search_box(container_id: str = "") -> Markup:
@@ -112,20 +106,7 @@ def render_search_box(container_id: str = "") -> Markup:
     ``Markup`` HTML for the search box.
     """
     search_id = f"{container_id}-search" if container_id else "anndata-search"
-    return Markup(
-        '<span class="anndata-search__box" style="{style}">'
-        '<input type="text" id="{sid}" name="{sid}" '
-        'class="anndata-search__input" '
-        'placeholder="Search..." aria-label="Search fields">'
-        '<span class="anndata-search__toggles">'
-        '<button type="button" class="anndata-search__toggle anndata-search__toggle--case" '
-        'title="Match case" aria-label="Match case" aria-pressed="false">Aa</button>'
-        '<button type="button" class="anndata-search__toggle anndata-search__toggle--regex" '
-        'title="Use regular expression" aria-label="Use regular expression" aria-pressed="false">.*</button>'
-        "</span>"
-        "</span>"
-        '<span class="anndata-search__indicator"></span>'
-    ).format(style=STYLE_HIDDEN, sid=search_id)
+    return Markup(get_macros().search_box(search_id))
 
 
 def render_copy_button(text: str, tooltip: str = "Copy") -> Markup:
@@ -151,7 +132,7 @@ def render_copy_button(text: str, tooltip: str = "Copy") -> Markup:
     >>> name = "gene_expression"
     >>> html = f"<span>{name}</span>{render_copy_button(name, 'Copy name')}"
     """
-    return Markup(_macros().copy_button(text, tooltip))
+    return Markup(get_macros().copy_button(text, tooltip))
 
 
 def _render_wrap_button(css_class: str) -> Markup:
@@ -159,7 +140,7 @@ def _render_wrap_button(css_class: str) -> Markup:
 
     Internal helper used by render_categories_wrap_button and render_columns_wrap_button.
     """
-    return Markup(_macros().wrap_button(css_class))
+    return Markup(get_macros().wrap_button(css_class))
 
 
 def render_categories_wrap_button() -> Markup:
@@ -194,7 +175,7 @@ def render_muted_span(text: str) -> Markup:
     -------
     ``Markup`` HTML with muted styling
     """
-    return Markup(_macros().muted_span(text))
+    return Markup(get_macros().muted_span(text))
 
 
 def render_filepath_span(path: str, style: str = "") -> Markup:
@@ -211,7 +192,7 @@ def render_filepath_span(path: str, style: str = "") -> Markup:
     -------
     ``Markup`` HTML for the filepath span.
     """
-    return Markup(_macros().filepath_span(path, style))
+    return Markup(get_macros().filepath_span(path, style))
 
 
 def render_nested_content(html_content: str | Markup) -> Markup:
@@ -233,7 +214,7 @@ def render_nested_content(html_content: str | Markup) -> Markup:
     ``Markup`` HTML closing the summary and wrapping nested content.
     """
     body = html_content if isinstance(html_content, Markup) else Markup(html_content)
-    return Markup(_macros().nested_content(body))
+    return Markup(get_macros().nested_content(body))
 
 
 def render_badge(
@@ -267,7 +248,7 @@ def render_badge(
     -------
     >>> badge = render_badge("Zarr", "anndata-badge--backed", "Backed by Zarr store")
     """
-    return Markup(_macros().badge(text, variant, tooltip))
+    return Markup(get_macros().badge(text, variant, tooltip))
 
 
 def render_header_badges(
@@ -341,7 +322,7 @@ def render_name_cell(name: str) -> Markup:
     -------
     ``Markup`` HTML for the cell span.
     """
-    return Markup(_macros().name_cell(name))
+    return Markup(get_macros().name_cell(name))
 
 
 def render_category_list(
@@ -378,7 +359,7 @@ def render_category_list(
 
     hidden_from_max_cats = max(0, len(categories) - max_cats)
     total_hidden = hidden_from_max_cats + n_hidden
-    return Markup(_macros().category_list(items, total_hidden))
+    return Markup(get_macros().category_list(items, total_hidden))
 
 
 @dataclass
@@ -470,7 +451,7 @@ def render_entry_type_cell(config: TypeCellConfig) -> Markup:
     ``Markup`` HTML for the complete type cell.
     """
     return Markup(
-        _macros().type_cell(
+        get_macros().type_cell(
             type_name=config.type_name,
             css_class=config.css_class,
             type_markup=config.type_markup,
@@ -505,7 +486,7 @@ def render_entry_preview_cell(
     ``Markup`` HTML for the preview cell.
     """
     return Markup(
-        _macros().preview_cell(
+        get_macros().preview_cell(
             preview_markup=preview_markup,
             preview_text=preview_text,
         )

@@ -181,14 +181,6 @@ class TestColorDetection:
 class TestFormatting:
     """Tests for formatting utilities."""
 
-    def test_escape_html(self):
-        """Test HTML escaping."""
-        from anndata._repr.utils import escape_html
-
-        assert escape_html("<script>") == "&lt;script&gt;"
-        assert escape_html("a & b") == "a &amp; b"
-        assert escape_html('"quoted"') == "&quot;quoted&quot;"
-
     def test_format_memory_size(self):
         """Test memory size formatting."""
         from anndata._repr.utils import format_memory_size
