@@ -547,7 +547,9 @@ class TestUnsRendererRegistry:
                 items = data.get("data", {})
                 return FormattedOutput(
                     type_name="test config",
-                    preview_markup=f'<span class="test-custom">Items: {len(items)}</span>',
+                    preview_markup=Markup(
+                        f'<span class="test-custom">Items: {len(items)}</span>'
+                    ),
                 )
 
         formatter = TestConfigFormatter()

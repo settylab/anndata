@@ -895,14 +895,12 @@ class AnnDataFormatter(TypeFormatter[object]):
             # Lazy import to avoid circular dependency
             from .html import generate_repr_html
 
-            nested_html = Markup(
-                generate_repr_html(
-                    obj,  # type: ignore[arg-type]
-                    depth=context.depth + 1,
-                    max_depth=context.max_depth,
-                    show_header=True,
-                    show_search=False,
-                )
+            nested_html = generate_repr_html(
+                obj,  # type: ignore[arg-type]
+                depth=context.depth + 1,
+                max_depth=context.max_depth,
+                show_header=True,
+                show_search=False,
             )
             expanded_markup = Markup(
                 f'<div class="{CSS_NESTED_ANNDATA}">{nested_html}</div>'

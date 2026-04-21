@@ -823,7 +823,7 @@ class TestCustomHtmlContent:
                 )
 
             def format(self, obj, context):
-                tree_html = """
+                tree_html = Markup("""
                 <div class="test-tree">
                     <ul>
                         <li>Root
@@ -834,7 +834,7 @@ class TestCustomHtmlContent:
                         </li>
                     </ul>
                 </div>
-                """
+                """)
                 return FormattedOutput(
                     type_name="TreeData (3 nodes)",
                     css_class="anndata-dtype--tree",

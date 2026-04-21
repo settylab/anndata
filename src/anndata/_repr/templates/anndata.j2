@@ -1,9 +1,7 @@
-{# Outer AnnData repr template (middle-ground POC).
-   All fragments (header, sections, footer, css, js) are rendered by the
-   existing Python code and arrive here as Markup — they pass through
-   autoescape verbatim.
-   The remaining interpolations ({{ container_id }}, {{ depth }},
-   {{ style }}) are user-adjacent values; Jinja autoescapes them by default.
+{# Outer AnnData repr frame.
+   Pre-rendered fragments (header, sections, footer, css, js) arrive as
+   Markup and pass through verbatim. Scalars (container_id, depth, style)
+   are plain str and autoescaped by the engine.
 #}
 {% if css %}{{ css }}{% endif %}
 <div class="anndata-repr" id="{{ container_id }}" data-depth="{{ depth }}" style="{{ style }}">

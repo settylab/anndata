@@ -105,9 +105,8 @@ def render_section(  # noqa: PLR0913
     if count_str is None:
         count_str = f"({n_items} items)"
 
-    # Existing internal callers produce trusted HTML fragments as ``str``.
-    # Autoescape would break that, so we wrap bare ``str`` in ``Markup``;
-    # callers that already pass ``Markup`` are a no-op through the constructor.
+    # Callers that produced HTML as plain ``str`` (legacy path) are implicitly
+    # trusted; ``Markup``-typed input passes through unchanged.
     entries = entries_html if isinstance(entries_html, Markup) else Markup(entries_html)
 
     rendered = (
@@ -159,43 +158,49 @@ def get_section_tooltip(section: str) -> str:
     return tooltips.get(section, "")
 
 
-def render_x_entry(obj: object, context: FormatterContext) -> str:
+def render_x_entry(obj: object, context: FormatterContext) -> Markup:
     """Render X as a single compact entry row.
 
     Works with AnnData, Raw, and any object with an X attribute.
     Handles missing or broken X attributes gracefully.
     """
-    parts = ['<div class="anndata-x__entry">']
-    parts.append("<span>X</span>")
+    parts: list[Markup] = [
+        Markup('<div class="anndata-x__entry">'),
+        Markup("<span>X</span>"),
+    ]
 
     try:
         X = obj.X
     except Exception as e:  # noqa: BLE001
-        # Handle missing or broken X attribute gracefully
         error_msg = f"error: {type(e).__name__}"
         parts.append(
-            f'<span class="{CSS_TEXT_MUTED}"><em>({escape_html(error_msg)})</em></span>'
+            Markup(
+                f'<span class="{CSS_TEXT_MUTED}"><em>({escape_html(error_msg)})</em></span>'
+            )
         )
-        parts.append("</div>")
-        return "\n".join(parts)
+        parts.append(Markup("</div>"))
+        return Markup("\n").join(parts)
 
     if X is None:
-        parts.append("<span><em>None</em></span>")
+        parts.append(Markup("<span><em>None</em></span>"))
     else:
-        # Format the X matrix (formatter includes all info like sparsity, on disk, etc.)
         try:
             output = formatter_registry.format_value(X, context)
             parts.append(
-                f'<span class="{output.css_class}">{escape_html(output.type_name)}</span>'
+                Markup(
+                    f'<span class="{output.css_class}">{escape_html(output.type_name)}</span>'
+                )
             )
         except Exception as e:  # noqa: BLE001
             error_msg = f"error formatting: {type(e).__name__}"
             parts.append(
-                f'<span class="{CSS_TEXT_MUTED}"><em>({escape_html(error_msg)})</em></span>'
+                Markup(
+                    f'<span class="{CSS_TEXT_MUTED}"><em>({escape_html(error_msg)})</em></span>'
+                )
             )
 
-    parts.append("</div>")
-    return "\n".join(parts)
+    parts.append(Markup("</div>"))
+    return Markup("\n").join(parts)
 
 
 def render_formatted_entry(
