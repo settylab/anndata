@@ -4,6 +4,8 @@
    All user-facing strings (name, count_str, tooltip) are autoescaped;
    doc_url is autoescaped inside the href attribute.
    `entries` is expected to be Markup (pre-rendered HTML).
+   `extra_classes` is an optional str of additional CSS classes
+   (e.g. "anndata-sec-unknown") appended to the root <details>.
 #}
 {%- macro section_header(name, count_str, doc_url, tooltip) -%}
 <summary>
@@ -14,15 +16,16 @@
   {%- endif %}
 </summary>
 {%- endmacro -%}
+{%- set root_class = 'anndata-section' ~ (' ' ~ extra_classes if extra_classes else '') -%}
 {%- if n_items == 0 -%}
-<details class="anndata-section" data-section="{{ section_id }}">
+<details class="{{ root_class }}" data-section="{{ section_id }}">
   {{ section_header(name, '(empty)', doc_url, tooltip) }}
   <div class="anndata-section__content">
     <div class="anndata-section__empty">No entries</div>
   </div>
 </details>
 {%- else -%}
-<details class="anndata-section" data-section="{{ section_id }}"{% if not should_collapse %} open{% endif %}>
+<details class="{{ root_class }}" data-section="{{ section_id }}"{% if not should_collapse %} open{% endif %}>
   {{ section_header(name, count_str, doc_url, tooltip) }}
   <div class="anndata-section__content">
     <div class="anndata-section__entries">

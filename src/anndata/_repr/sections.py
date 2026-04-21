@@ -53,6 +53,7 @@ from .core import (
     render_truncation_indicator,
     render_x_entry,
 )
+from .environment import get_env
 from .registry import (
     FormattedEntry,
     extract_uns_type_hint,
@@ -332,37 +333,33 @@ def _detect_unknown_sections(
 
 def _render_unknown_sections(unknown_sections: list[tuple[str, str]]) -> Markup:
     """Render a section showing unknown/unrecognized attributes."""
-    parts = [
-        '<details class="anndata-section anndata-sec-unknown" data-section="unknown">'
-    ]
-    parts.append("<summary>")
-    parts.append('<span class="anndata-section__name">other</span>')
-    parts.append(
-        f'<span class="anndata-section__count">({len(unknown_sections)})</span>'
-    )
-    parts.append("</summary>")
-
-    parts.append('<div class="anndata-section__content">')
-    parts.append('<div class="anndata-section__entries">')
-
+    rows: list[Markup] = []
     for attr_name, type_desc in unknown_sections:
-        parts.append(render_entry_row_open(attr_name, type_desc))
-        parts.append(render_name_cell(attr_name))
-        parts.append('<span class="anndata-entry__type">')
-        parts.append(
-            Markup('<span class="{}" title="Unrecognized attribute">{}</span>').format(
-                CSS_DTYPE_UNKNOWN, type_desc
+        type_cell = render_entry_type_cell(
+            TypeCellConfig(
+                type_name=type_desc,
+                css_class=CSS_DTYPE_UNKNOWN,
+                tooltip="Unrecognized attribute",
             )
         )
-        parts.append("</span>")
-        parts.append('<span class="anndata-entry__preview"></span>')
-        parts.append("</div>")
+        rows.append(
+            Markup("{row_open}{name}{type}{preview}</div>").format(
+                row_open=render_entry_row_open(attr_name, type_desc),
+                name=render_name_cell(attr_name),
+                type=type_cell,
+                preview=render_entry_preview_cell(),
+            )
+        )
 
-    parts.append("</div>")
-    parts.append("</div>")
-    parts.append("</details>")
-
-    return Markup("\n".join(parts))
+    n = len(unknown_sections)
+    return render_section(
+        "other",
+        Markup("\n").join(rows),
+        n_items=n,
+        section_id="unknown",
+        count_str=f"({n})",
+        extra_classes="anndata-sec-unknown",
+    )
 
 
 def _render_error_entry(section: str, error: str) -> Markup:
@@ -370,19 +367,11 @@ def _render_error_entry(section: str, error: str) -> Markup:
     error_str = str(error)
     if len(error_str) > ERROR_TRUNCATE_LENGTH:
         error_str = error_str[:ERROR_TRUNCATE_LENGTH] + "..."
-    return Markup("""
-<details class="anndata-section anndata-sec-error" data-section="{section}" open>
-    <summary>
-        <span class="anndata-section__name">{section}</span>
-        <span class="anndata-section__count anndata-badge--error">(error)</span>
-    </summary>
-    <div class="anndata-section__content">
-        <div class="anndata-entry--error">
-            Failed to render: {error_str}
-        </div>
-    </div>
-</details>
-""").format(section=section, error_str=error_str)
+    return Markup(
+        get_env()
+        .get_template("error_entry.j2")
+        .render(section=section, error=error_str)
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -470,35 +459,43 @@ def _render_raw_section(
     meta_parts = _get_raw_meta_parts(raw)
     meta_text = ", ".join(meta_parts) if meta_parts else ""
 
-    # Single row container (like a minimal section with just one entry)
-    parts = ['<div class="anndata-sec anndata-sec-raw" data-section="raw">']
-    parts.append('<div class="anndata-section__entries">')
-
     # Single row with raw info
     type_str = f"{format_number(n_obs)} obs × {format_number(n_vars)} var"
-    parts.append(render_entry_row_open("raw", "Raw", has_expandable_content=can_expand))
-    parts.append(render_name_cell("raw"))
-    type_cell_config = TypeCellConfig(
-        type_name=type_str,
-        css_class=CSS_DTYPE_ANNDATA,
-    )
-    parts.append(render_entry_type_cell(type_cell_config))
-    parts.append(render_entry_preview_cell(preview_text=meta_text))
-
-    # Nested content (entry is <details>/<summary> when can_expand)
+    row_parts: list[Markup] = [
+        render_entry_row_open("raw", "Raw", has_expandable_content=can_expand),
+        render_name_cell("raw"),
+        render_entry_type_cell(
+            TypeCellConfig(type_name=type_str, css_class=CSS_DTYPE_ANNDATA)
+        ),
+        render_entry_preview_cell(preview_text=meta_text),
+    ]
     if can_expand:
         nested_html = _generate_raw_repr_html(raw, context.child("raw"))
-        # Wrap in anndata-entry__nested-anndata for specific styling
-        wrapped_html = f'<div class="anndata-entry__nested-anndata">{nested_html}</div>'
-        parts.append(render_nested_content(wrapped_html))
-        parts.append("</details>")  # close expandable entry
+        wrapped_html = Markup(
+            '<div class="anndata-entry__nested-anndata">{}</div>'
+        ).format(nested_html)
+        row_parts.append(render_nested_content(wrapped_html))
+        row_parts.append(Markup("</details>"))
     else:
-        parts.append("</div>")  # close plain entry
+        row_parts.append(Markup("</div>"))
 
-    parts.append("</div>")  # close entries grid
-    parts.append("</div>")  # close section
+    entry_markup = Markup("\n").join(row_parts)
+    return Markup(
+        get_env()
+        .get_template("raw_section.j2")
+        .render(entry_markup=entry_markup)
+    )
 
-    return Markup("\n".join(parts))
+
+def _safe_index_preview(raw: object, attr: str) -> Markup | None:
+    """Read ``raw.<attr>`` and return its format_index_preview Markup, or None."""
+    try:
+        names = getattr(raw, attr, None)
+    except Exception:  # noqa: BLE001
+        return None
+    if names is None:
+        return None
+    return format_index_preview(names)
 
 
 def _generate_raw_repr_html(
@@ -517,75 +514,39 @@ def _generate_raw_repr_html(
     context
         FormatterContext with depth, max_depth, fold_threshold, max_items
     """
-    # Safely get dimensions
     n_obs = _safe_get_attr(raw, "n_obs", "?")
     n_vars = _safe_get_attr(raw, "n_vars", "?")
-
-    parts = []
-
-    # Container with header showing Raw shape
-    container_id = f"raw-repr-{id(raw)}"
-    parts.append(f'<div class="anndata-repr" id="{container_id}">')
-
-    # Header for Raw - same structure as AnnData header
-    parts.append('<div class="anndata-header">')
-    parts.append('<span class="anndata-header__type">Raw</span>')
     shape_str = f"{format_number(n_obs)} obs × {format_number(n_vars)} var"
-    parts.append(f'<span class="anndata-header__shape">{shape_str}</span>')
-    parts.append("</div>")
 
-    # Index preview (obs_names and var_names)
-    parts.append('<div class="anndata-header__index">')
-    try:
-        obs_names = getattr(raw, "obs_names", None)
-        if obs_names is not None:
-            parts.append(
-                f"<div><strong>obs_names:</strong> {format_index_preview(obs_names)}</div>"
-            )
-        else:
-            parts.append(
-                "<div><strong>obs_names:</strong> <em>not available</em></div>"
-            )
-    except Exception:  # noqa: BLE001
-        parts.append("<div><strong>obs_names:</strong> <em>not available</em></div>")
-    try:
-        var_names = getattr(raw, "var_names", None)
-        if var_names is not None:
-            parts.append(
-                f"<div><strong>var_names:</strong> {format_index_preview(var_names)}</div>"
-            )
-        else:
-            parts.append(
-                "<div><strong>var_names:</strong> <em>not available</em></div>"
-            )
-    except Exception:  # noqa: BLE001
-        parts.append("<div><strong>var_names:</strong> <em>not available</em></div>")
-    parts.append("</div>")
-
-    # X section - show matrix info (with error handling)
+    sections: list[Markup] = []
     try:
         if hasattr(raw, "X") and raw.X is not None:
-            parts.append(render_x_entry(raw, context))
+            sections.append(render_x_entry(raw, context))
     except Exception as e:  # noqa: BLE001
-        parts.append(_render_error_entry("X", str(e)))
+        sections.append(_render_error_entry("X", str(e)))
 
-    # var section (like AnnData's var)
     try:
         if hasattr(raw, "var") and raw.var is not None and len(raw.var.columns) > 0:
-            # Raw doesn't have the same structure as AnnData, so clear adata_ref
             var_context = replace(context, adata_ref=None, section="var")
-            parts.append(_render_dataframe_section("var", raw.var, var_context))
+            sections.append(_render_dataframe_section("var", raw.var, var_context))
     except Exception as e:  # noqa: BLE001
-        parts.append(_render_error_entry("var", str(e)))
+        sections.append(_render_error_entry("var", str(e)))
 
-    # varm section (like AnnData's varm)
     try:
         if hasattr(raw, "varm") and raw.varm is not None and len(raw.varm) > 0:
             varm_context = replace(context, adata_ref=None, section="varm")
-            parts.append(_render_mapping_section("varm", raw.varm, varm_context))
+            sections.append(_render_mapping_section("varm", raw.varm, varm_context))
     except Exception as e:  # noqa: BLE001
-        parts.append(_render_error_entry("varm", str(e)))
+        sections.append(_render_error_entry("varm", str(e)))
 
-    parts.append("</div>")
-
-    return Markup("\n".join(parts))
+    return Markup(
+        get_env()
+        .get_template("raw_repr.j2")
+        .render(
+            container_id=f"raw-repr-{id(raw)}",
+            shape_str=shape_str,
+            obs_preview=_safe_index_preview(raw, "obs_names"),
+            var_preview=_safe_index_preview(raw, "var_names"),
+            sections=sections,
+        )
+    )

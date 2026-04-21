@@ -45,6 +45,7 @@ def render_section(  # noqa: PLR0913
     should_collapse: bool = False,
     section_id: str | None = None,
     count_str: str | None = None,
+    extra_classes: str = "",
 ) -> Markup:
     """
     Render a complete section with header and content.
@@ -128,6 +129,7 @@ def render_section(  # noqa: PLR0913
             section_id=section_id,
             n_items=n_items,
             entries=entries,
+            extra_classes=extra_classes,
         )
     )
 
