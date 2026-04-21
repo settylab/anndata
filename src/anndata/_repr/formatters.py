@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+from markupsafe import Markup
 
 from .._repr_constants import (
     COLOR_PREVIEW_LIMIT,
@@ -395,22 +396,22 @@ class DataFrameFormatter(TypeFormatter[pd.DataFrame]):
 
         # Build preview_html with column list for obsm/varm sections
         # Uses anndata-columns class for CSS truncation and JS wrap button
-        preview_html = None
+        preview_html: Markup | None = None
         if n_cols > 0 and context.section in ("obsm", "varm"):
             col_str = ", ".join(escape_html(str(c)) for c in cols)
-            preview_html = f'<span class="anndata-columns">[{col_str}]</span>'
+            preview_html = Markup(f'<span class="anndata-columns">[{col_str}]</span>')
 
         # Check if expandable _repr_html_ is enabled
         expand_dataframes = get_setting("repr_html_dataframe_expand", default=False)
 
-        expanded_html = None
+        expanded_html: Markup | None = None
         if expand_dataframes and n_rows > 0 and n_cols > 0:
             # Use pandas _repr_html_() for native Jupyter-style output
             # Respects pd.options.display settings (max_rows, max_columns, etc.)
             # Intentional broad catch: _repr_html_() can fail in many ways
             # (memory, recursion, custom dtypes, etc.) - gracefully degrade
             with contextlib.suppress(Exception):
-                expanded_html = df._repr_html_()
+                expanded_html = Markup(df._repr_html_())
 
         return FormattedOutput(
             type_name=f"DataFrame ({format_number(n_rows)} × {format_number(n_cols)})",
@@ -543,7 +544,7 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
         )
 
         # Build preview_html with category list and colors
-        preview_html = None
+        preview_html: Markup | None = None
         error = None
         if context.section in ("obs", "var") and context.key is not None:
             try:
@@ -555,9 +556,11 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
                 if len(categories) == 0:
                     # Metadata-only mode or no categories: show just count
                     if n_total is not None:
-                        preview_html = f'<span class="{CSS_TEXT_MUTED}">({n_total} categories)</span>'
+                        preview_html = Markup(
+                            f'<span class="{CSS_TEXT_MUTED}">({n_total} categories)</span>'
+                        )
                     else:
-                        preview_html = (
+                        preview_html = Markup(
                             f'<span class="{CSS_TEXT_MUTED}">(categories)</span>'
                         )
                 else:
@@ -887,19 +890,23 @@ class AnnDataFormatter(TypeFormatter[object]):
         shape_str = f"{format_number(obj.n_obs)} × {format_number(obj.n_vars)}"  # type: ignore[attr-defined]
 
         # Generate expanded HTML if within depth limit
-        expanded_html = None
+        expanded_html: Markup | None = None
         if context.depth < context.max_depth - 1:
             # Lazy import to avoid circular dependency
             from .html import generate_repr_html
 
-            nested_html = generate_repr_html(
-                obj,  # type: ignore[arg-type]
-                depth=context.depth + 1,
-                max_depth=context.max_depth,
-                show_header=True,
-                show_search=False,
+            nested_html = Markup(
+                generate_repr_html(
+                    obj,  # type: ignore[arg-type]
+                    depth=context.depth + 1,
+                    max_depth=context.max_depth,
+                    show_header=True,
+                    show_search=False,
+                )
             )
-            expanded_html = f'<div class="{CSS_NESTED_ANNDATA}">{nested_html}</div>'
+            expanded_html = Markup(
+                f'<div class="{CSS_NESTED_ANNDATA}">{nested_html}</div>'
+            )
 
         return FormattedOutput(
             type_name=f"AnnData ({shape_str})",
@@ -1054,7 +1061,7 @@ class ColorListFormatter(TypeFormatter[list]):
                 f'<span class="{CSS_TEXT_MUTED}">+{n_colors - COLOR_PREVIEW_LIMIT}</span>'
             )
 
-        preview_html = f'<span class="{CSS_COLORS}">{"".join(swatches)}</span>'
+        preview_html = Markup(f'<span class="{CSS_COLORS}">{"".join(swatches)}</span>')
 
         # Build warnings list (only for colors within preview limit)
         warnings = []
