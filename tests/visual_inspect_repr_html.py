@@ -34,6 +34,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from markupsafe import Markup
 
 import anndata as ad
 
@@ -219,7 +220,7 @@ try:
                     type_name=f"DiGraph ({n_nodes} nodes, {n_leaves} leaves)",
                     css_class="anndata-dtype--tree",
                     tooltip=f"Phylogenetic tree with {n_nodes} total nodes",
-                    expanded_html=svg_html,
+                    expanded_html=Markup(svg_html),
                 )
                 entries.append(FormattedEntry(key=key, output=output))
             return entries
@@ -258,7 +259,7 @@ try:
                     type_name=f"DiGraph ({n_nodes} nodes, {n_leaves} leaves)",
                     css_class="anndata-dtype--tree",
                     tooltip=f"Phylogenetic tree with {n_nodes} total nodes",
-                    expanded_html=svg_html,
+                    expanded_html=Markup(svg_html),
                 )
                 entries.append(FormattedEntry(key=key, output=output))
             return entries
@@ -319,7 +320,7 @@ try:
                     entries.append(FormattedEntry(key=label, output=output))
             return entries
 
-        def render_html(self, obj, context: FormatterContext) -> str:
+        def render_html(self, obj, context: FormatterContext) -> Markup:
             """Render as a compact line instead of a foldable section."""
             from anndata._repr.utils import escape_html
 
@@ -336,7 +337,7 @@ try:
                         f"{escape_html(repr(val))}"
                     )
             summary = " &nbsp; ".join(pairs)
-            return (
+            return Markup(
                 '<div class="anndata-x__entry">'
                 f"<span>tree</span>"
                 f"<span>{summary}</span>"
@@ -433,7 +434,7 @@ try:
                     type_name=f"AnnData ({shape_str})",
                     css_class="anndata-dtype--anndata",
                     tooltip=f"Modality: {mod_name}",
-                    expanded_html=nested_html if can_expand else None,
+                    expanded_html=Markup(nested_html) if can_expand else None,
                     is_serializable=True,
                 )
                 entries.append(FormattedEntry(key=mod_name, output=output))
@@ -640,7 +641,7 @@ try:
             for name, info in self.images.items():
                 # Build meta content (dimensions info) for the META column
                 dims_str = ", ".join(info.get("dims", ["y", "x"]))
-                meta = f'<span class="anndata-meta-info">[{dims_str}]</span>'
+                meta = Markup(f'<span class="anndata-meta-info">[{dims_str}]</span>')
 
                 # Create a FormattedEntry with FormattedOutput
                 entry = FormattedEntry(
@@ -667,7 +668,7 @@ try:
             rows = []
             for name, info in self.labels.items():
                 dims_str = ", ".join(info.get("dims", ["y", "x"]))
-                meta = f'<span class="anndata-meta-info">[{dims_str}]</span>'
+                meta = Markup(f'<span class="anndata-meta-info">[{dims_str}]</span>')
 
                 entry = FormattedEntry(
                     key=name,
@@ -690,7 +691,9 @@ try:
             """Build points section."""
             rows = []
             for name, info in self.points.items():
-                meta = f'<span class="anndata-meta-info">{info["n_dims"]}D coordinates</span>'
+                meta = Markup(
+                    f'<span class="anndata-meta-info">{info["n_dims"]}D coordinates</span>'
+                )
 
                 entry = FormattedEntry(
                     key=name,
@@ -713,7 +716,9 @@ try:
             """Build shapes section."""
             rows = []
             for name, info in self.shapes.items():
-                meta = f'<span class="anndata-meta-info">{info["geometry_type"]}</span>'
+                meta = Markup(
+                    f'<span class="anndata-meta-info">{info["geometry_type"]}</span>'
+                )
 
                 entry = FormattedEntry(
                     key=name,
@@ -756,7 +761,8 @@ try:
                     output=FormattedOutput(
                         type_name=f"AnnData ({adata.n_obs} × {adata.n_vars})",
                         css_class="anndata-dtype--anndata",
-                        expanded_html=nested_html,  # Makes the nested content collapsible
+                        # Makes the nested content collapsible
+                        expanded_html=Markup(nested_html),
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
@@ -1940,7 +1946,8 @@ def main():  # noqa: PLR0915, PLR0912
 
             return FormattedOutput(
                 type_name="analysis history",
-                preview_html="".join(html_parts),  # Use preview_html for inline preview
+                # preview_html takes Markup — join the pre-escaped fragments
+                preview_html=Markup("".join(html_parts)),
             )
 
     adata_uns = AnnData(np.zeros((10, 5)))
@@ -3267,7 +3274,7 @@ Size bomb below (50KB):
                 type_name=type_name,
                 css_class="anndata-dtype--category",
                 tooltip="\n".join(tooltip_parts),
-                preview_html=cat_html,
+                preview_html=Markup(cat_html),
                 warnings=[]
                 if validated
                 else [f"{unmapped_count} values not mapped to ontology"],
