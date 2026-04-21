@@ -84,12 +84,26 @@ The system is designed to be extensible via two registry patterns:
                 return FormattedOutput(
                     type_name=f"MyArray {obj.shape}",
                     css_class="anndata-dtype--myarray",
-                    # preview_markup is typed Markup — wrap trusted HTML at
-                    # the formatter boundary so autoescape lets it through.
+                    # ``preview_markup`` takes trusted HTML. Build it with
+                    # ``Markup('<tag>{}</tag>').format(value)`` — MarkupSafe
+                    # autoescapes each non-``Markup`` arg at that boundary.
                     preview_markup=Markup(
-                        f'<span class="anndata-text--muted">({obj.n_items} items)</span>'
-                    ),
+                        '<span class="mypackage-summary">{} items</span>'
+                    ).format(obj.n_items),
                 )
+
+    **Preview contract**: if no custom HTML is needed, prefer the plain-text
+    ``preview`` field (autoescaped end-to-end). Use ``preview_markup`` when
+    you need custom structure. Three valid idioms:
+
+    - ``Markup('<tag>{}</tag>').format(value)`` — standard MarkupSafe pattern;
+      each non-``Markup`` arg is autoescaped.
+    - ``Markup(obj._repr_html_())`` — wrap trusted HTML from another package.
+    - ``get_macros().my_macro(value)`` — invoke a Jinja macro directly, which
+      also benefits from the engine's NUL-scrub finalize hook.
+
+    Never build HTML via ``Markup(f'...{value}...')`` — the f-string substitutes
+    ``value`` before ``Markup`` sees it, bypassing autoescape.
 
     **Error handling**: Formatters can signal errors in two ways:
 
@@ -125,7 +139,9 @@ The system is designed to be extensible via two registry patterns:
                 hint, data = extract_uns_type_hint(obj)
                 return FormattedOutput(
                     type_name="config",
-                    preview_markup=Markup("<span>Custom config preview</span>"),
+                    preview_markup=Markup(
+                        '<span class="anndata-text--muted">{}</span>'
+                    ).format(data.get("name", "(unnamed)")),
                 )
 
     Data structure for type hints (works in any section)::
@@ -295,16 +311,14 @@ their own ``_repr_html_``, you can reuse anndata's CSS, JavaScript, and helpers.
 
 **Embedding nested AnnData** with full interactivity::
 
-    from markupsafe import Markup
-
     from anndata._repr import generate_repr_html, FormattedEntry, FormattedOutput
 
-    nested_html = generate_repr_html(adata, depth=1, max_depth=3)
+    # generate_repr_html already returns Markup; no Markup(...) wrap needed.
     entry = FormattedEntry(
         key="table",
         output=FormattedOutput(
             type_name=f"AnnData ({adata.n_obs} x {adata.n_vars})",
-            expanded_markup=Markup(nested_html),  # Collapsible content below the row
+            expanded_markup=generate_repr_html(adata, depth=1, max_depth=3),
         ),
     )
 
@@ -365,6 +379,7 @@ from .components import (  # noqa: E402
     render_warning_icon,
 )
 from .css import get_css  # noqa: E402
+from .environment import get_macros  # noqa: E402
 from .html import (  # noqa: E402
     generate_repr_html,
     render_formatted_entry,
@@ -425,6 +440,7 @@ __all__ = [  # noqa: RUF022  # organized by category, not alphabetically
     # Building blocks for custom _repr_html_ implementations
     "get_css",
     "get_javascript",
+    "get_macros",
     "format_number",
     "format_memory_size",
     "render_section",

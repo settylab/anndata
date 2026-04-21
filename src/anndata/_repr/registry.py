@@ -13,7 +13,11 @@ Usage for extending to new types:
 
     from anndata._repr import register_formatter, TypeFormatter, FormattedOutput
 
-    # Format by Python type (e.g., custom array in obsm)
+    # Format by Python type (e.g., custom array in obsm).
+    # Three ways to populate the preview column:
+    #   - preview=<str>                                 — plain text, autoescaped
+    #   - preview_markup=Markup('<tag>{}</tag>').format(value) — custom HTML
+    #   - preview_markup=Markup(obj._repr_html_())      — reuse trusted HTML
     @register_formatter
     class MyArrayFormatter(TypeFormatter):
         def can_format(self, obj, context):
@@ -23,14 +27,12 @@ Usage for extending to new types:
             return FormattedOutput(
                 type_name=f"MyArray {obj.shape}",
                 css_class="anndata-dtype--myarray",
-                # preview_markup is typed Markup — wrap the trusted fragment
-                # at construction so the template renders it verbatim.
                 preview_markup=Markup(
-                    f'<span class="anndata-text--muted">({obj.n_items} items)</span>'
-                ),
+                    '<span class="mypackage-summary">{} items</span>'
+                ).format(obj.n_items),
             )
 
-    # Format by embedded type hint (e.g., tagged data in uns)
+    # Format by embedded type hint (e.g., tagged data in uns).
     from anndata._repr import extract_uns_type_hint
 
     @register_formatter
@@ -45,8 +47,16 @@ Usage for extending to new types:
             hint, data = extract_uns_type_hint(obj)
             return FormattedOutput(
                 type_name="config",
-                preview_markup=Markup("<span>Custom config preview</span>"),
+                preview_markup=Markup(
+                    '<span class="anndata-text--muted">{}</span>'
+                ).format(data.get("name", "(unnamed)")),
             )
+
+Never build HTML via ``Markup(f'...{value}...')`` — the f-string interpolates
+``value`` before ``Markup`` sees it, bypassing autoescape. Use
+``Markup('<tag>{}</tag>').format(value)`` instead (standard MarkupSafe idiom),
+or invoke a macro via ``get_macros()`` which also scrubs NUL bytes via the
+template engine's finalize hook.
 """
 
 from __future__ import annotations
@@ -989,10 +999,12 @@ def extract_uns_type_hint(value: object) -> tuple[str | None, object]:
 
             def format(self, obj, context):
                 hint, data = extract_uns_type_hint(obj)
-                # Render your custom visualization
                 return FormattedOutput(
                     type_name="mytype",
-                    preview_markup=Markup("<span>Custom rendering</span>"),
+                    # ``Markup.format`` autoescapes each non-``Markup`` arg.
+                    preview_markup=Markup(
+                        '<span class="mypackage-badge">{}</span>'
+                    ).format(data.get("label", "untitled")),
                 )
 
     2. When the user imports your package, the formatter is registered

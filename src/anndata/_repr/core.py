@@ -254,15 +254,13 @@ def render_formatted_entry(
 
     With expandable nested content::
 
-        from markupsafe import Markup
-
-        nested_html = generate_repr_html(adata, depth=1)
+        # generate_repr_html already returns Markup — no wrap needed.
         entry = FormattedEntry(
             key="cell_table",
             output=FormattedOutput(
                 type_name="AnnData (150 × 30)",
                 css_class=CSS_DTYPE_ANNDATA,
-                expanded_markup=Markup(nested_html),
+                expanded_markup=generate_repr_html(adata, depth=1),
             ),
         )
         html = render_formatted_entry(entry)

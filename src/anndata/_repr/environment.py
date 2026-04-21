@@ -66,5 +66,11 @@ def get_env() -> Environment:
 
 @cache
 def get_macros():
-    """Cached handle to the macros module from ``_macros.j2``."""
+    """Cached handle to the macros module from ``_macros.j2``.
+
+    Extension packages can invoke any macro as ``get_macros().name(args)``.
+    Macro calls render through this module's Jinja environment, so
+    arguments flow through autoescape + the NUL-scrub finalize hook — the
+    safest way to build custom HTML from user data.
+    """
     return get_env().get_template("_macros.j2").module
