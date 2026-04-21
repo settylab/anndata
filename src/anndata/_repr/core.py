@@ -11,6 +11,7 @@ between html.py and sections.py.
 
 from __future__ import annotations
 
+from functools import cache
 from typing import TYPE_CHECKING
 
 from markupsafe import Markup
@@ -27,6 +28,11 @@ from .utils import format_number
 
 if TYPE_CHECKING:
     from .registry import FormattedEntry, FormatterContext
+
+
+@cache
+def _macros():
+    return get_env().get_template("_macros.j2").module
 
 
 def render_section(  # noqa: PLR0913
@@ -137,9 +143,7 @@ def render_empty_section(
 
 def render_truncation_indicator(remaining: int) -> Markup:
     """Render a truncation indicator."""
-    return Markup(
-        f'<div class="anndata-section__truncated">... and {format_number(remaining)} more</div>'
-    )
+    return Markup(_macros().truncation_indicator(format_number(remaining)))
 
 
 def get_section_tooltip(section: str) -> str:

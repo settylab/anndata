@@ -20,11 +20,7 @@ from functools import cache
 
 from markupsafe import Markup
 
-from .._repr_constants import (
-    CSS_ENTRY,
-    CSS_TEXT_MUTED,
-    STYLE_HIDDEN,
-)
+from .._repr_constants import CSS_ENTRY, STYLE_HIDDEN
 from .environment import get_env
 from .utils import sanitize_css_color
 
@@ -76,14 +72,8 @@ def render_entry_row_open(
     if is_error:
         classes.append("error")
     css_class = " ".join(classes)
-
-    if has_expandable_content:
-        return Markup(
-            '<details class="{}" data-key="{}" data-dtype="{}">'
-            '<summary class="anndata-entry__summary">'
-        ).format(css_class, key, dtype)
-    return Markup('<div class="{}" data-key="{}" data-dtype="{}">').format(
-        css_class, key, dtype
+    return Markup(
+        _macros().row_open(key, dtype, css_class, has_expandable_content)
     )
 
 
@@ -228,12 +218,7 @@ def render_nested_content(html_content: str | Markup) -> Markup:
     ``Markup`` HTML closing the summary and wrapping nested content.
     """
     body = html_content if isinstance(html_content, Markup) else Markup(html_content)
-    return Markup(
-        f"</summary>"
-        f'<div class="anndata-entry__nested-content" style="margin-left:1.5em">'
-        f'<div class="anndata-entry__expanded">{body}</div>'
-        f"</div>"
-    )
+    return Markup(_macros().nested_content(body))
 
 
 def render_badge(
@@ -341,14 +326,7 @@ def render_name_cell(name: str) -> Markup:
     -------
     ``Markup`` HTML for the cell span.
     """
-    return Markup(
-        '<span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top">'
-        '<span class="anndata-entry__name-inner">'
-        '<span class="anndata-entry__name-text" title="{name}">{name}</span>'
-        "{copy_btn}"
-        "</span>"
-        "</span>"
-    ).format(name=name, copy_btn=render_copy_button(name, "Copy name"))
+    return Markup(_macros().name_cell(name))
 
 
 def render_category_list(
@@ -376,37 +354,16 @@ def render_category_list(
     -------
     HTML string for the category list
     """
-    parts: list[Markup] = [Markup('<span class="anndata-categories">')]
-    for i, cat in enumerate(categories[:max_cats]):
-        if i > 0:
-            parts.append(Markup('<span class="anndata-categories__sep">, </span>'))
-        color = colors[i] if colors and i < len(colors) else None
-        parts.append(Markup('<span class="anndata-categories__item">'))
-        if color:
-            # Sanitize color to prevent CSS injection
-            safe_color = sanitize_css_color(str(color))
-            if safe_color:
-                parts.append(
-                    Markup(
-                        '<span class="anndata-categories__dot" style="background:{};"></span>'
-                    ).format(safe_color)
-                )
-            # Skip color dot if color is invalid/unsafe
-        parts.append(Markup("<span>{}</span>").format(str(cat)))
-        parts.append(Markup("</span>"))
+    visible = categories[:max_cats]
+    items: list[tuple[str, str | None]] = []
+    for i, cat in enumerate(visible):
+        raw_color = colors[i] if colors and i < len(colors) else None
+        safe_color = sanitize_css_color(str(raw_color)) if raw_color else None
+        items.append((str(cat), safe_color))
 
-    # Calculate total hidden: from max_cats truncation + lazy truncation
     hidden_from_max_cats = max(0, len(categories) - max_cats)
     total_hidden = hidden_from_max_cats + n_hidden
-
-    if total_hidden > 0:
-        parts.append(
-            Markup('<span class="{}">...+{}</span>').format(
-                CSS_TEXT_MUTED, total_hidden
-            )
-        )
-    parts.append(Markup("</span>"))
-    return Markup("").join(parts)
+    return Markup(_macros().category_list(items, total_hidden))
 
 
 @dataclass
@@ -497,48 +454,19 @@ def render_entry_type_cell(config: TypeCellConfig) -> Markup:
     -------
     ``Markup`` HTML for the complete type cell.
     """
-    type_name = config.type_name
-    css_class = config.css_class
-    type_markup = config.type_markup
-    tooltip = config.tooltip
-    warnings = config.warnings
-    is_not_serializable = config.is_not_serializable
-    has_columns_list = config.has_columns_list
-    has_categories_list = config.has_categories_list
-    append_type_markup = config.append_type_markup
-
-    parts: list[str | Markup] = [
-        Markup(
-            '<span class="anndata-entry__type" style="display:inline-block;min-width:var(--anndata-type-col-width,180px);vertical-align:top">'
+    return Markup(
+        _macros().type_cell(
+            type_name=config.type_name,
+            css_class=config.css_class,
+            type_markup=config.type_markup,
+            tooltip=config.tooltip,
+            all_warnings=config.warnings,
+            is_not_serializable=config.is_not_serializable,
+            has_columns_list=config.has_columns_list,
+            has_categories_list=config.has_categories_list,
+            append_type_markup=config.append_type_markup,
         )
-    ]
-
-    if type_markup and not append_type_markup:
-        parts.append(type_markup)
-    elif tooltip:
-        parts.append(
-            Markup('<span class="{}" title="{}">{}</span>').format(
-                css_class, tooltip, type_name
-            )
-        )
-    else:
-        parts.append(Markup('<span class="{}">{}</span>').format(css_class, type_name))
-
-    parts.append(
-        render_warning_icon(warnings or [], is_not_serializable=is_not_serializable)
     )
-    if has_columns_list:
-        parts.append(render_columns_wrap_button())
-    if has_categories_list:
-        parts.append(render_categories_wrap_button())
-
-    if type_markup and append_type_markup:
-        parts.append(
-            Markup(f'<span class="anndata-entry__custom">{type_markup}</span>')
-        )
-
-    parts.append(Markup("</span>"))
-    return Markup("").join(parts)
 
 
 def render_entry_preview_cell(
@@ -561,16 +489,9 @@ def render_entry_preview_cell(
     -------
     ``Markup`` HTML for the preview cell.
     """
-    parts: list[str | Markup] = [
-        Markup(
-            '<span class="anndata-entry__preview" style="display:inline-block;vertical-align:top">'
+    return Markup(
+        _macros().preview_cell(
+            preview_markup=preview_markup,
+            preview_text=preview_text,
         )
-    ]
-
-    if preview_markup:
-        parts.append(preview_markup)
-    elif preview_text:
-        parts.append(render_muted_span(preview_text))
-
-    parts.append(Markup("</span>"))
-    return Markup("").join(parts)
+    )
