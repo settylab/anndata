@@ -26,6 +26,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from markupsafe import Markup
+
 from .._repr_constants import (
     CSS_DTYPE_ANNDATA,
     CSS_DTYPE_UNKNOWN,
@@ -76,7 +78,7 @@ def _render_entry_row(
     *,
     append_type_html: bool = False,
     preview_note: str | None = None,
-) -> str:
+) -> Markup:
     """Render an entry row for DataFrame, mapping, or uns sections.
 
     Key validation is handled by FormatterRegistry.format_value() via context.key,
@@ -114,7 +116,7 @@ def _render_dataframe_section(
     section: str,
     df: pd.DataFrame,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render obs or var section."""
     n_cols = len(df.columns)
 
@@ -159,10 +161,10 @@ def _render_mapping_section(
     section: str,
     mapping: object,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render obsm, varm, layers, obsp, varp sections."""
     if mapping is None:
-        return ""
+        return Markup("")
 
     # Get count without creating full list (O(1) for most mappings)
     n_items = len(mapping)
@@ -206,7 +208,7 @@ def _render_mapping_section(
 def _render_uns_section(
     uns: object,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render the uns section with special handling."""
     # Get count without creating full list (O(1) for dict)
     n_items = len(uns)
@@ -241,7 +243,7 @@ def _render_uns_entry(
     key: str,
     value: object,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render a single uns entry with special type handling.
 
     Rendering priority:
@@ -329,7 +331,7 @@ def _detect_unknown_sections(
     return unknown
 
 
-def _render_unknown_sections(unknown_sections: list[tuple[str, str]]) -> str:
+def _render_unknown_sections(unknown_sections: list[tuple[str, str]]) -> Markup:
     """Render a section showing unknown/unrecognized attributes."""
     parts = [
         '<details class="anndata-section anndata-sec-unknown" data-section="unknown">'
@@ -360,16 +362,16 @@ def _render_unknown_sections(unknown_sections: list[tuple[str, str]]) -> str:
     parts.append("</div>")
     parts.append("</details>")
 
-    return "\n".join(parts)
+    return Markup("\n".join(parts))
 
 
-def _render_error_entry(section: str, error: str) -> str:
+def _render_error_entry(section: str, error: str) -> Markup:
     """Render an error indicator for a section that failed to render."""
     error_str = str(error)
     if len(error_str) > ERROR_TRUNCATE_LENGTH:
         error_str = error_str[:ERROR_TRUNCATE_LENGTH] + "..."
     error_escaped = escape_html(error_str)
-    return f"""
+    return Markup(f"""
 <details class="anndata-section anndata-sec-error" data-section="{escape_html(section)}" open>
     <summary>
         <span class="anndata-section__name">{escape_html(section)}</span>
@@ -381,7 +383,7 @@ def _render_error_entry(section: str, error: str) -> str:
         </div>
     </div>
 </details>
-"""
+""")
 
 
 # -----------------------------------------------------------------------------
@@ -441,7 +443,7 @@ def _get_raw_meta_parts(raw: object) -> list[str]:
 def _render_raw_section(
     raw: object,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render the raw section as a single expandable row.
 
     The raw section shows unprocessed data that was saved before filtering/normalization.
@@ -456,7 +458,7 @@ def _render_raw_section(
     The depth parameter prevents infinite recursion.
     """
     if raw is None:
-        return ""
+        return Markup("")
 
     # Safely get dimensions with fallbacks
     n_obs = _safe_get_attr(raw, "n_obs", "?")
@@ -497,13 +499,13 @@ def _render_raw_section(
     parts.append("</div>")  # close entries grid
     parts.append("</div>")  # close section
 
-    return "\n".join(parts)
+    return Markup("\n".join(parts))
 
 
 def _generate_raw_repr_html(
     raw,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Generate HTML repr for a Raw object.
 
     This renders X, var, and varm sections similar to AnnData,
@@ -587,4 +589,4 @@ def _generate_raw_repr_html(
 
     parts.append("</div>")
 
-    return "\n".join(parts)
+    return Markup("\n".join(parts))
