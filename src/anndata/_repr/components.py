@@ -42,7 +42,7 @@ def render_entry_row_open(
     is_error: bool = False,
     has_expandable_content: bool = False,
     extra_classes: str = "",
-) -> str:
+) -> Markup:
     """Render the opening tag for an entry row.
 
     For regular entries, returns ``<div class="anndata-entry ...">``.
@@ -66,9 +66,8 @@ def render_entry_row_open(
 
     Returns
     -------
-    Opening tag(s) with class and data attributes
+    ``Markup`` HTML for the opening tag(s) with class and data attributes.
     """
-    # Build CSS class string
     classes = [CSS_ENTRY]
     if extra_classes:
         classes.append(extra_classes)
@@ -82,11 +81,13 @@ def render_entry_row_open(
     escaped_dtype = escape_html(dtype)
 
     if has_expandable_content:
-        return (
+        return Markup(
             f'<details class="{css_class}" data-key="{escaped_key}" data-dtype="{escaped_dtype}">'
             f'<summary class="anndata-entry__summary">'
         )
-    return f'<div class="{css_class}" data-key="{escaped_key}" data-dtype="{escaped_dtype}">'
+    return Markup(
+        f'<div class="{css_class}" data-key="{escaped_key}" data-dtype="{escaped_dtype}">'
+    )
 
 
 def render_warning_icon(
@@ -108,7 +109,7 @@ def render_warning_icon(
     return Markup(_macros().warning_icon(warnings or [], is_not_serializable))
 
 
-def render_search_box(container_id: str = "") -> str:
+def render_search_box(container_id: str = "") -> Markup:
     """
     Render a search box with filter indicator and search mode toggles.
 
@@ -123,19 +124,12 @@ def render_search_box(container_id: str = "") -> str:
 
     Returns
     -------
-    HTML string for the search box
-
-    Example
-    -------
-    >>> container_id = "spatialdata-123"
-    >>> parts = ['<div class="anndata-header">']
-    >>> parts.append('<span class="anndata-header__type">SpatialData</span>')
-    >>> parts.append('<span class="anndata-spacer"></span>')  # Spacer
-    >>> parts.append(render_search_box(container_id))
-    >>> parts.append("</div>")
+    ``Markup`` HTML for the search box.
     """
-    search_id = f"{container_id}-search" if container_id else "anndata-search"
-    return (
+    search_id = escape_html(
+        f"{container_id}-search" if container_id else "anndata-search"
+    )
+    return Markup(
         f'<span class="anndata-search__box" style="{STYLE_HIDDEN}">'
         f'<input type="text" id="{search_id}" name="{search_id}" '
         f'class="anndata-search__input" '
@@ -220,7 +214,7 @@ def render_muted_span(text: str) -> Markup:
     return Markup(_macros().muted_span(text))
 
 
-def render_nested_content(html_content: str) -> str:
+def render_nested_content(html_content: str | Markup) -> Markup:
     """Render nested/expanded content inside an expandable entry.
 
     The entry must have been opened with ``has_expandable_content=True``
@@ -231,16 +225,18 @@ def render_nested_content(html_content: str) -> str:
     Parameters
     ----------
     html_content
-        The HTML content to display when expanded
+        The trusted HTML (``Markup`` preferred; ``str`` is wrapped) to
+        display when expanded.
 
     Returns
     -------
-    HTML closing the summary and wrapping nested content
+    ``Markup`` HTML closing the summary and wrapping nested content.
     """
-    return (
+    body = html_content if isinstance(html_content, Markup) else Markup(html_content)
+    return Markup(
         f"</summary>"
         f'<div class="anndata-entry__nested-content" style="margin-left:1.5em">'
-        f'<div class="anndata-entry__expanded">{html_content}</div>'
+        f'<div class="anndata-entry__expanded">{body}</div>'
         f"</div>"
     )
 
@@ -335,7 +331,7 @@ def render_header_badges(
     return Markup("").join(parts)
 
 
-def render_name_cell(name: str) -> str:
+def render_name_cell(name: str) -> Markup:
     """Render a name cell with copy button and tooltip for truncated names.
 
     The structure uses flexbox so the copy button stays visible even when
@@ -348,10 +344,10 @@ def render_name_cell(name: str) -> str:
 
     Returns
     -------
-    HTML string for the cell div
+    ``Markup`` HTML for the cell span.
     """
     escaped_name = escape_html(name)
-    return (
+    return Markup(
         f'<span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top">'
         f'<span class="anndata-entry__name-inner">'
         f'<span class="anndata-entry__name-text" title="{escaped_name}">{escaped_name}</span>'
@@ -463,7 +459,7 @@ class TypeCellConfig:
 
     type_name: str
     css_class: str
-    type_html: str | None = None
+    type_html: Markup | None = None
     tooltip: str = ""
     warnings: list[str] = field(default_factory=list)
     is_not_serializable: bool = False
@@ -472,7 +468,7 @@ class TypeCellConfig:
     append_type_html: bool = False
 
 
-def render_entry_type_cell(config: TypeCellConfig) -> str:
+def render_entry_type_cell(config: TypeCellConfig) -> Markup:
     """Render the type cell for an entry row.
 
     This is a unified helper that handles all type cell variations:
@@ -500,16 +496,7 @@ def render_entry_type_cell(config: TypeCellConfig) -> str:
 
     Returns
     -------
-    HTML string for the complete type cell
-
-    Examples
-    --------
-    >>> config = TypeCellConfig(
-    ...     type_name="ndarray (100, 50) float32",
-    ...     css_class="anndata-dtype--ndarray",
-    ...     tooltip="Dense array",
-    ... )
-    >>> html = render_entry_type_cell(config)
+    ``Markup`` HTML for the complete type cell.
     """
     type_name = config.type_name
     css_class = config.css_class
@@ -521,45 +508,47 @@ def render_entry_type_cell(config: TypeCellConfig) -> str:
     has_categories_list = config.has_categories_list
     append_type_html = config.append_type_html
 
-    parts = [
-        '<span class="anndata-entry__type" style="display:inline-block;min-width:var(--anndata-type-col-width,180px);vertical-align:top">'
+    parts: list[str | Markup] = [
+        Markup(
+            '<span class="anndata-entry__type" style="display:inline-block;min-width:var(--anndata-type-col-width,180px);vertical-align:top">'
+        )
     ]
 
-    # Type content: handle different cases
     if type_html and not append_type_html:
-        # type_html replaces the type label entirely
         parts.append(type_html)
     elif tooltip:
         parts.append(
-            f'<span class="{css_class}" title="{escape_html(tooltip)}">'
-            f"{escape_html(type_name)}</span>"
+            Markup(
+                f'<span class="{css_class}" title="{escape_html(tooltip)}">'
+                f"{escape_html(type_name)}</span>"
+            )
         )
     else:
-        parts.append(f'<span class="{css_class}">{escape_html(type_name)}</span>')
+        parts.append(
+            Markup(f'<span class="{css_class}">{escape_html(type_name)}</span>')
+        )
 
-    # Warning icon
     parts.append(
         render_warning_icon(warnings or [], is_not_serializable=is_not_serializable)
     )
-
-    # Wrap buttons
     if has_columns_list:
         parts.append(render_columns_wrap_button())
     if has_categories_list:
         parts.append(render_categories_wrap_button())
 
-    # Appended type_html (for custom inline rendering below the type)
     if type_html and append_type_html:
-        parts.append(f'<span class="anndata-entry__custom">{type_html}</span>')
+        parts.append(
+            Markup(f'<span class="anndata-entry__custom">{type_html}</span>')
+        )
 
-    parts.append("</span>")
-    return "".join(parts)
+    parts.append(Markup("</span>"))
+    return Markup("").join(parts)
 
 
 def render_entry_preview_cell(
-    preview_html: str | None = None,
+    preview_html: Markup | None = None,
     preview_text: str | None = None,
-) -> str:
+) -> Markup:
     """Render the preview cell (third column) for an entry row.
 
     Formatters are responsible for producing complete preview content.
@@ -568,16 +557,18 @@ def render_entry_preview_cell(
     Parameters
     ----------
     preview_html
-        Raw HTML content for preview (highest priority)
+        Trusted HTML (``Markup``) for preview (highest priority).
     preview_text
-        Plain text preview (will be escaped and muted)
+        Plain text preview (autoescaped and muted).
 
     Returns
     -------
-    HTML string for the preview cell
+    ``Markup`` HTML for the preview cell.
     """
-    parts = [
-        '<span class="anndata-entry__preview" style="display:inline-block;vertical-align:top">'
+    parts: list[str | Markup] = [
+        Markup(
+            '<span class="anndata-entry__preview" style="display:inline-block;vertical-align:top">'
+        )
     ]
 
     if preview_html:
@@ -585,5 +576,5 @@ def render_entry_preview_cell(
     elif preview_text:
         parts.append(render_muted_span(preview_text))
 
-    parts.append("</span>")
-    return "".join(parts)
+    parts.append(Markup("</span>"))
+    return Markup("").join(parts)

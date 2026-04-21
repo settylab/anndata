@@ -50,6 +50,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
+from markupsafe import Markup
+
 if TYPE_CHECKING:
     from typing import TypeGuard
 
@@ -129,9 +131,10 @@ class FormattedOutput:
     Always used for data-dtype attribute (search/filter). Auto-escaped.
     Defaults to 'unknown' for resilience when type extraction fails."""
 
-    type_html: str | None = None
-    """Optional. Raw HTML to render in type column instead of type_name.
-    If provided, replaces the visual rendering but type_name still used for data-dtype."""
+    type_html: Markup | None = None
+    """Optional. Trusted HTML (``markupsafe.Markup``) to render in the type
+    column instead of ``type_name``. If provided, replaces the visual
+    rendering but ``type_name`` is still used for the ``data-dtype`` attribute."""
 
     css_class: str = CSS_DTYPE_UNKNOWN
     """CSS class for styling the type column."""
@@ -146,13 +149,15 @@ class FormattedOutput:
     """Optional. Plain text for preview column (rightmost). Auto-escaped.
     Mutually exclusive with preview_html."""
 
-    preview_html: str | None = None
-    """Optional. Raw HTML for preview column (e.g., category pills with colors).
-    Takes precedence over preview if both provided (with warning)."""
+    preview_html: Markup | None = None
+    """Optional. Trusted HTML (``markupsafe.Markup``) for the preview column
+    (e.g., category pills with colors). Takes precedence over ``preview`` if
+    both provided (with warning)."""
 
-    expanded_html: str | None = None
-    """Optional. Raw HTML for expandable content shown in collapsible row below.
-    If provided, an 'Expand ▼' button is added to the type column."""
+    expanded_html: Markup | None = None
+    """Optional. Trusted HTML (``markupsafe.Markup``) for expandable content
+    shown in the collapsible row below. If provided, an 'Expand ▼' button is
+    added to the type column."""
 
     is_serializable: bool = True
     """Whether this type can be serialized to H5AD/Zarr."""
