@@ -306,20 +306,11 @@ def render_formatted_entry(
     elif preview_note:
         preview_text = preview_note
 
-    # Pre-rendered HTML fragments (produced by Python formatters) arrive as
-    # plain str; wrap in Markup so the template trust contract holds.
-    type_html = Markup(output.type_html) if output.type_html else None
-    if isinstance(preview_html, str) and not isinstance(preview_html, Markup):
-        preview_html = Markup(preview_html)
-    expanded_html = (
-        Markup(output.expanded_html) if output.expanded_html else None
-    )
-
     rendered = get_env().get_template("entry.j2").render(
         entry_key=entry.key,
         type_name=output.type_name,
         css_class=output.css_class,
-        type_html=type_html,
+        type_html=output.type_html,
         tooltip=output.tooltip,
         all_warnings=all_warnings,
         is_not_serializable=not output.is_serializable,
@@ -330,6 +321,6 @@ def render_formatted_entry(
         append_type_html=append_type_html,
         preview_html=preview_html,
         preview_text=preview_text,
-        expanded_html=expanded_html,
+        expanded_html=output.expanded_html,
     )
     return Markup(rendered)

@@ -9,6 +9,8 @@ This module provides a registry system that allows:
 
 Usage for extending to new types:
 
+    from markupsafe import Markup
+
     from anndata._repr import register_formatter, TypeFormatter, FormattedOutput
 
     # Format by Python type (e.g., custom array in obsm)
@@ -21,8 +23,11 @@ Usage for extending to new types:
             return FormattedOutput(
                 type_name=f"MyArray {obj.shape}",
                 css_class="anndata-dtype--myarray",
-                # preview_html for rightmost column (data preview, counts, etc.)
-                preview_html=f'<span class="anndata-text--muted">({obj.n_items} items)</span>',
+                # preview_html is typed Markup — wrap the trusted fragment
+                # at construction so the template renders it verbatim.
+                preview_html=Markup(
+                    f'<span class="anndata-text--muted">({obj.n_items} items)</span>'
+                ),
             )
 
     # Format by embedded type hint (e.g., tagged data in uns)
@@ -40,7 +45,7 @@ Usage for extending to new types:
             hint, data = extract_uns_type_hint(obj)
             return FormattedOutput(
                 type_name="config",
-                preview_html='<span>Custom config preview</span>',
+                preview_html=Markup("<span>Custom config preview</span>"),
             )
 """
 
@@ -614,9 +619,11 @@ class FallbackFormatter(TypeFormatter[object]):
         if all_errors:
             try:
                 error_text = escape_html(", ".join(all_errors))
-                preview_html = f'<span class="{CSS_TEXT_ERROR}">{error_text}</span>'
+                preview_html = Markup(
+                    f'<span class="{CSS_TEXT_ERROR}">{error_text}</span>'
+                )
             except Exception:  # noqa: BLE001
-                preview_html = f'<span class="{CSS_TEXT_ERROR}">Error</span>'
+                preview_html = Markup(f'<span class="{CSS_TEXT_ERROR}">Error</span>')
         else:
             # No errors - check if unknown type warning needed
             try:
