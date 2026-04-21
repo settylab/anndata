@@ -14,11 +14,11 @@ that scopes it to a specific container element.
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from importlib.resources import files
 
 
-@lru_cache(maxsize=1)
+@cache
 def _load_js_content() -> str:
     """Load main JS content from static file (cached)."""
     return files("anndata._repr.static").joinpath("repr.js").read_text(encoding="utf-8")
@@ -27,6 +27,11 @@ def _load_js_content() -> str:
 def get_javascript(container_id: str) -> str:
     """
     Get the JavaScript code for a specific container.
+
+    Each rendered repr ships the full source so that any cell is
+    self-sufficient (surviving deletion, reorder, or notebook reopen),
+    but only the first to execute installs ``window.anndataRepr`` —
+    subsequent cells reuse the installed ``init`` for their own container.
 
     Parameters
     ----------
@@ -40,10 +45,15 @@ def get_javascript(container_id: str) -> str:
     js_content = _load_js_content()
     return f"""<script>
 (function() {{
-    // Scoped to avoid conflicts with multiple repr instances
     const container = document.getElementById('{container_id}');
     if (!container) return;
-
-    {js_content}
+    if (!window.anndataRepr) {{
+        window.anndataRepr = {{
+            init: function(container) {{
+                {js_content}
+            }}
+        }};
+    }}
+    window.anndataRepr.init(container);
 }})();
 </script>"""
