@@ -135,3 +135,79 @@
 {%- endif -%}
 </span>
 {%- endmacro -%}
+
+{# Error preview span: muted-red error message used in the preview column. #}
+{%- macro error_preview(message) -%}
+<span class="{{ CSS_TEXT_ERROR }}">{{ message }}</span>
+{%- endmacro -%}
+
+{# Warning preview span: yellow warning message used in the preview column. #}
+{%- macro warning_preview(message) -%}
+<span class="{{ CSS_TEXT_WARNING }}">{{ message }}</span>
+{%- endmacro -%}
+
+{# Muted error span: an italicised, parenthesised error shown in a muted
+   colour (used for attribute-access / format errors in the X entry and
+   similar compact rows). #}
+{%- macro muted_error_span(error_msg) -%}
+<span class="{{ CSS_TEXT_MUTED }}"><em>({{ error_msg }})</em></span>
+{%- endmacro -%}
+
+{# DataFrame columns preview: "[col1, col2, ...]" list used in obsm/varm for
+   DataFrames. `columns` is a sequence of plain str values; Jinja autoescapes
+   each when rendered inside {{ … }}. #}
+{%- macro columns_preview(columns) -%}
+<span class="anndata-columns">[{{ columns|join(", ") }}]</span>
+{%- endmacro -%}
+
+{# Single color swatch. Caller has already run sanitize_css_color on the
+   supplied `color` and passes `valid=True` when the result was non-None.
+   For invalid colors we render a "?" placeholder with the original label
+   in the tooltip. #}
+{%- macro color_swatch(color, label, valid=true) -%}
+{%- if valid -%}
+<span class="{{ CSS_COLORS_SWATCH }}" style="background:{{ color }}" title="{{ label }}"></span>
+{%- else -%}
+<span class="{{ CSS_COLORS_SWATCH }} {{ CSS_COLORS_SWATCH_INVALID }}" title="Invalid color: '{{ label }}'">?</span>
+{%- endif -%}
+{%- endmacro -%}
+
+{# Color preview wrapper: aggregates already-rendered swatches (Markup) and an
+   optional overflow counter. `swatches` is an iterable of Markup fragments
+   produced by `color_swatch`; they pass through verbatim. #}
+{%- macro color_preview(swatches, overflow_count=0) -%}
+<span class="{{ CSS_COLORS }}">
+{%- for swatch in swatches -%}
+{{ swatch }}
+{%- endfor -%}
+{%- if overflow_count and overflow_count > 0 -%}
+<span class="{{ CSS_TEXT_MUTED }}">+{{ overflow_count }}</span>
+{%- endif -%}
+</span>
+{%- endmacro -%}
+
+{# Wrapper for a nested AnnData repr (the HTML fragment produced by
+   generate_repr_html for a nested object). `inner` is Markup and passes
+   through verbatim. #}
+{%- macro nested_anndata_wrapper(inner) -%}
+<div class="{{ CSS_NESTED_ANNDATA }}">{{ inner }}</div>
+{%- endmacro -%}
+
+{# README info icon span. `content` and `tooltip` are plain str and must be
+   pre-scrubbed of NULs by the caller (Python replaces "\x00" -> "\ufffd"
+   before passing in). Jinja autoescapes the rest. #}
+{%- macro readme_icon(content, tooltip) -%}
+<span class="anndata-readme__icon" data-readme="{{ content }}" title="{{ tooltip }}" role="button" tabindex="0" aria-label="View README">ⓘ</span>
+{%- endmacro -%}
+
+{# Plain <pre> block for fallback rendering when the HTML repr is disabled. #}
+{%- macro pre_fallback(text) -%}
+<pre>{{ text }}</pre>
+{%- endmacro -%}
+
+{# Search box: input + case/regex toggle buttons + filter indicator. The
+   whole box is hidden until JS enables it (STYLE_HIDDEN). `search_id` is a
+   plain str and is autoescaped. #}
+{%- macro search_box(search_id) -%}
+<span class="anndata-search__box" style="{{ STYLE_HIDDEN }}"><input type="text" id="{{ search_id }}" name="{{ search_id }}" class="anndata-search__input" placeholder="Search..." aria-label="Search fields"><span class="anndata-search__toggles"><button type="button" class="anndata-search__toggle anndata-search__toggle--case" title="Match case" aria-label="Match case" aria-pressed="false">Aa</button><button type="button" class="anndata-search__toggle anndata-search__toggle--regex" title="Use regular expression" aria-label="Use regular expression" aria-pressed="false">.*</button></span></span><span class="anndata-search__indicator"></span>
+{%- endmacro -%}

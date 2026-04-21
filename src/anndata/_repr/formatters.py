@@ -25,9 +25,6 @@ from markupsafe import Markup
 
 from .._repr_constants import (
     COLOR_PREVIEW_LIMIT,
-    CSS_COLORS,
-    CSS_COLORS_SWATCH,
-    CSS_COLORS_SWATCH_INVALID,
     CSS_DTYPE_ANNDATA,
     CSS_DTYPE_ARRAY_API,
     CSS_DTYPE_AWKWARD,
@@ -43,11 +40,10 @@ from .._repr_constants import (
     CSS_DTYPE_STRING,
     CSS_DTYPE_TPU,
     CSS_DTYPE_UNKNOWN,
-    CSS_NESTED_ANNDATA,
-    CSS_TEXT_MUTED,
 )
 from ..compat import has_xp
-from .components import render_category_list
+from .components import render_category_list, render_muted_span
+from .environment import get_macros
 from .lazy import get_lazy_categorical_info, is_lazy_column
 from .registry import (
     FormattedOutput,
@@ -397,8 +393,8 @@ class DataFrameFormatter(TypeFormatter[pd.DataFrame]):
         # Uses anndata-columns class for CSS truncation and JS wrap button
         preview_markup: Markup | None = None
         if n_cols > 0 and context.section in ("obsm", "varm"):
-            preview_markup = Markup('<span class="anndata-columns">[{}]</span>').format(
-                Markup(", ").join(str(c) for c in cols)
+            preview_markup = Markup(
+                get_macros().columns_preview([str(c) for c in cols])
             )
 
         # Check if expandable _repr_html_ is enabled
@@ -556,13 +552,9 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
                 if len(categories) == 0:
                     # Metadata-only mode or no categories: show just count
                     if n_total is not None:
-                        preview_markup = Markup(
-                            f'<span class="{CSS_TEXT_MUTED}">({n_total} categories)</span>'
-                        )
+                        preview_markup = render_muted_span(f"({n_total} categories)")
                     else:
-                        preview_markup = Markup(
-                            f'<span class="{CSS_TEXT_MUTED}">(categories)</span>'
-                        )
+                        preview_markup = render_muted_span("(categories)")
                 else:
                     # Get colors for categories
                     colors = None
@@ -903,7 +895,7 @@ class AnnDataFormatter(TypeFormatter[object]):
                 show_search=False,
             )
             expanded_markup = Markup(
-                f'<div class="{CSS_NESTED_ANNDATA}">{nested_html}</div>'
+                get_macros().nested_anndata_wrapper(Markup(nested_html))
             )
 
         return FormattedOutput(
@@ -1041,31 +1033,20 @@ class ColorListFormatter(TypeFormatter[list]):
         invalid_count = 0
         for color in colors[:COLOR_PREVIEW_LIMIT]:
             # Sanitize color to prevent CSS injection
-            safe_color = sanitize_css_color(str(color))
+            label = str(color)
+            safe_color = sanitize_css_color(label)
             if safe_color:
                 swatches.append(
-                    Markup(
-                        '<span class="{}" style="background:{}" title="{}"></span>'
-                    ).format(CSS_COLORS_SWATCH, safe_color, str(color))
+                    Markup(get_macros().color_swatch(safe_color, label, valid=True))
                 )
             else:
-                # Invalid/unsafe color - show as text only, no style
                 invalid_count += 1
                 swatches.append(
-                    Markup(
-                        '<span class="{} {}" title="Invalid color: \'{}\'">?</span>'
-                    ).format(CSS_COLORS_SWATCH, CSS_COLORS_SWATCH_INVALID, str(color))
+                    Markup(get_macros().color_swatch("", label, valid=False))
                 )
-        if n_colors > COLOR_PREVIEW_LIMIT:
-            swatches.append(
-                Markup('<span class="{}">+{}</span>').format(
-                    CSS_TEXT_MUTED, n_colors - COLOR_PREVIEW_LIMIT
-                )
-            )
+        overflow = max(0, n_colors - COLOR_PREVIEW_LIMIT)
 
-        preview_markup = Markup('<span class="{}">{}</span>').format(
-            CSS_COLORS, Markup("").join(swatches)
-        )
+        preview_markup = Markup(get_macros().color_preview(swatches, overflow))
 
         # Build warnings list (only for colors within preview limit)
         warnings = []

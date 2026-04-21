@@ -57,7 +57,7 @@ from .core import (
     render_x_entry,
 )
 from .css import get_css
-from .environment import get_env
+from .environment import get_env, get_macros
 from .javascript import get_javascript
 from .lazy import get_lazy_backing_info, is_lazy_adata
 from .registry import (
@@ -256,7 +256,7 @@ def generate_repr_html(  # noqa: PLR0913
     """
     # Check if HTML repr is enabled
     if not get_setting("repr_html_enabled", default=True):
-        return Markup("<pre>{}</pre>").format(repr(adata))
+        return Markup(get_macros().pre_fallback(repr(adata)))
 
     # Create formatter context (resolves settings)
     context = _create_formatter_context(
@@ -535,14 +535,14 @@ def _build_readme_icon(adata: AnnData) -> Markup | None:
     if len(readme_content) > TOOLTIP_TRUNCATE_LENGTH:
         tooltip_text += "..."
 
-    return Markup(
-        '<span class="anndata-readme__icon" '
-        'data-readme="{}" '
-        'title="{}" '
-        'role="button" tabindex="0" aria-label="View README">'
-        "ⓘ"
-        "</span>"
-    ).format(readme_content, tooltip_text)
+    # Scrub NULs before the template: the previous ``.format(...)`` path only
+    # HTML-escaped, so NUL bytes flowed through into the ``data-readme``
+    # attribute. The macro autoescapes but doesn't scrub; Jinja's finalize
+    # hook scrubs too, but being explicit here keeps the contract obvious.
+    readme_content = readme_content.replace("\x00", "\ufffd")
+    tooltip_text = tooltip_text.replace("\x00", "\ufffd")
+
+    return Markup(get_macros().readme_icon(readme_content, tooltip_text))
 
 
 def _render_header(

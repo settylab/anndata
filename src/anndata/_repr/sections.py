@@ -53,9 +53,10 @@ from .core import (
     render_truncation_indicator,
     render_x_entry,
 )
-from .environment import get_env
+from .environment import get_env, get_macros
 from .registry import (
     FormattedEntry,
+    FormattedOutput,
     extract_uns_type_hint,
     formatter_registry,
 )
@@ -69,7 +70,7 @@ if TYPE_CHECKING:
 
     from anndata import AnnData
 
-    from .registry import FormattedOutput, FormatterContext
+    from .registry import FormatterContext
 
 
 def _render_entry_row(
@@ -333,23 +334,19 @@ def _detect_unknown_sections(
 
 def _render_unknown_sections(unknown_sections: list[tuple[str, str]]) -> Markup:
     """Render a section showing unknown/unrecognized attributes."""
-    rows: list[Markup] = []
-    for attr_name, type_desc in unknown_sections:
-        type_cell = render_entry_type_cell(
-            TypeCellConfig(
-                type_name=type_desc,
-                css_class=CSS_DTYPE_UNKNOWN,
-                tooltip="Unrecognized attribute",
+    rows: list[Markup] = [
+        render_formatted_entry(
+            FormattedEntry(
+                key=attr_name,
+                output=FormattedOutput(
+                    type_name=type_desc,
+                    css_class=CSS_DTYPE_UNKNOWN,
+                    tooltip="Unrecognized attribute",
+                ),
             )
         )
-        rows.append(
-            Markup("{row_open}{name}{type}{preview}</div>").format(
-                row_open=render_entry_row_open(attr_name, type_desc),
-                name=render_name_cell(attr_name),
-                type=type_cell,
-                preview=render_entry_preview_cell(),
-            )
-        )
+        for attr_name, type_desc in unknown_sections
+    ]
 
     n = len(unknown_sections)
     return render_section(
@@ -471,9 +468,7 @@ def _render_raw_section(
     ]
     if can_expand:
         nested_html = _generate_raw_repr_html(raw, context.child("raw"))
-        wrapped_html = Markup(
-            '<div class="anndata-entry__nested-anndata">{}</div>'
-        ).format(nested_html)
+        wrapped_html = Markup(get_macros().nested_anndata_wrapper(nested_html))
         row_parts.append(render_nested_content(wrapped_html))
         row_parts.append(Markup("</details>"))
     else:
@@ -481,9 +476,7 @@ def _render_raw_section(
 
     entry_markup = Markup("\n").join(row_parts)
     return Markup(
-        get_env()
-        .get_template("raw_section.j2")
-        .render(entry_markup=entry_markup)
+        get_env().get_template("raw_section.j2").render(entry_markup=entry_markup)
     )
 
 

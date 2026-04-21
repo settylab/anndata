@@ -57,14 +57,14 @@ from typing import TYPE_CHECKING
 
 from markupsafe import Markup
 
+from .environment import get_macros
+
 if TYPE_CHECKING:
     from typing import TypeGuard
 
 from .._repr_constants import (
     CSS_DTYPE_EXTENSION,
     CSS_DTYPE_UNKNOWN,
-    CSS_TEXT_ERROR,
-    CSS_TEXT_WARNING,
     DEFAULT_FOLD_THRESHOLD,
     DEFAULT_MAX_CATEGORIES,
     DEFAULT_MAX_DEPTH,
@@ -621,13 +621,11 @@ class FallbackFormatter(TypeFormatter[object]):
 
         if all_errors:
             try:
-                preview_markup = Markup('<span class="{}">{}</span>').format(
-                    CSS_TEXT_ERROR, ", ".join(all_errors)
+                preview_markup = Markup(
+                    get_macros().error_preview(", ".join(all_errors))
                 )
             except Exception:  # noqa: BLE001
-                preview_markup = Markup('<span class="{}">Error</span>').format(
-                    CSS_TEXT_ERROR
-                )
+                preview_markup = Markup(get_macros().error_preview("Error"))
         else:
             # No errors - check if unknown type warning needed
             try:
@@ -639,8 +637,8 @@ class FallbackFormatter(TypeFormatter[object]):
                 ))
                 if not is_extension:
                     warnings.append(f"Unknown type: {full_name}")
-                    preview_markup = Markup('<span class="{}">{}</span>').format(
-                        CSS_TEXT_WARNING, f"Unknown type: {full_name}"
+                    preview_markup = Markup(
+                        get_macros().warning_preview(f"Unknown type: {full_name}")
                     )
             except Exception:  # noqa: BLE001
                 pass
