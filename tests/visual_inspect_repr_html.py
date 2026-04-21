@@ -220,7 +220,7 @@ try:
                     type_name=f"DiGraph ({n_nodes} nodes, {n_leaves} leaves)",
                     css_class="anndata-dtype--tree",
                     tooltip=f"Phylogenetic tree with {n_nodes} total nodes",
-                    expanded_html=Markup(svg_html),
+                    expanded_markup=Markup(svg_html),
                 )
                 entries.append(FormattedEntry(key=key, output=output))
             return entries
@@ -259,7 +259,7 @@ try:
                     type_name=f"DiGraph ({n_nodes} nodes, {n_leaves} leaves)",
                     css_class="anndata-dtype--tree",
                     tooltip=f"Phylogenetic tree with {n_nodes} total nodes",
-                    expanded_html=Markup(svg_html),
+                    expanded_markup=Markup(svg_html),
                 )
                 entries.append(FormattedEntry(key=key, output=output))
             return entries
@@ -434,7 +434,7 @@ try:
                     type_name=f"AnnData ({shape_str})",
                     css_class="anndata-dtype--anndata",
                     tooltip=f"Modality: {mod_name}",
-                    expanded_html=Markup(nested_html) if can_expand else None,
+                    expanded_markup=Markup(nested_html) if can_expand else None,
                     is_serializable=True,
                 )
                 entries.append(FormattedEntry(key=mod_name, output=output))
@@ -649,7 +649,7 @@ try:
                     output=FormattedOutput(
                         type_name=f"DataArray {info['shape']} {info['dtype']}",
                         css_class="anndata-dtype--ndarray",
-                        preview_html=meta,  # Content in preview column (rightmost)
+                        preview_markup=meta,  # Content in preview column (rightmost)
                     ),
                 )
                 # render_formatted_entry() creates the table row HTML
@@ -675,7 +675,7 @@ try:
                     output=FormattedOutput(
                         type_name=f"Labels {info['shape']} {info['dtype']}",
                         css_class="anndata-dtype--ndarray",
-                        preview_html=meta,
+                        preview_markup=meta,
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
@@ -700,7 +700,7 @@ try:
                     output=FormattedOutput(
                         type_name=f"dask.DataFrame ({format_number(info['n_points'])} × {info['n_dims']})",
                         css_class="anndata-dtype--dataframe",
-                        preview_html=meta,
+                        preview_markup=meta,
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
@@ -725,7 +725,7 @@ try:
                     output=FormattedOutput(
                         type_name=f"GeoDataFrame ({format_number(info['n_shapes'])} shapes)",
                         css_class="anndata-dtype--dataframe",
-                        preview_html=meta,
+                        preview_markup=meta,
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
@@ -755,14 +755,14 @@ try:
                     show_search=False,
                 )
 
-                # FormattedOutput with expanded_html makes it collapsible
+                # FormattedOutput with expanded_markup makes it collapsible
                 entry = FormattedEntry(
                     key=name,
                     output=FormattedOutput(
                         type_name=f"AnnData ({adata.n_obs} × {adata.n_vars})",
                         css_class="anndata-dtype--anndata",
                         # Makes the nested content collapsible
-                        expanded_html=Markup(nested_html),
+                        expanded_markup=Markup(nested_html),
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
@@ -1946,8 +1946,8 @@ def main():  # noqa: PLR0915, PLR0912
 
             return FormattedOutput(
                 type_name="analysis history",
-                # preview_html takes Markup — join the pre-escaped fragments
-                preview_html=Markup("".join(html_parts)),
+                # preview_markup takes Markup — join the pre-escaped fragments
+                preview_markup=Markup("".join(html_parts)),
             )
 
     adata_uns = AnnData(np.zeros((10, 5)))
@@ -2337,7 +2337,7 @@ For more details, see the full documentation.
             "<ul>"
             "<li><code>get_css()</code> / <code>get_javascript()</code> - reuse styling and interactivity</li>"
             "<li><code>render_section()</code> - create collapsible sections (images, labels, points, shapes, tables)</li>"
-            "<li><code>render_formatted_entry()</code> with <code>preview_html</code> - table rows with preview column</li>"
+            "<li><code>render_formatted_entry()</code> with <code>preview_markup</code> - table rows with preview column</li>"
             "<li><code>generate_repr_html()</code> - embed nested AnnData (see 'tables' section)</li>"
             "<li><code>FormatterRegistry</code> - custom 'transforms' section added via SectionFormatter</li>"
             "</ul>"
@@ -3224,7 +3224,7 @@ Size bomb below (50KB):
 
             This produces a FormattedOutput with:
             - type_name: "category[registry] (n)" instead of just "category (n)"
-            - preview_html: Category values with validation indicators
+            - preview_markup: Category values with validation indicators
             - tooltip: Shows ontology ID and validation status
             - warnings: If unmapped values exist
             """
@@ -3274,7 +3274,7 @@ Size bomb below (50KB):
                 type_name=type_name,
                 css_class="anndata-dtype--category",
                 tooltip="\n".join(tooltip_parts),
-                preview_html=Markup(cat_html),
+                preview_markup=Markup(cat_html),
                 warnings=[]
                 if validated
                 else [f"{unmapped_count} values not mapped to ontology"],

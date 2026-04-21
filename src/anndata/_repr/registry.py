@@ -23,9 +23,9 @@ Usage for extending to new types:
             return FormattedOutput(
                 type_name=f"MyArray {obj.shape}",
                 css_class="anndata-dtype--myarray",
-                # preview_html is typed Markup — wrap the trusted fragment
+                # preview_markup is typed Markup — wrap the trusted fragment
                 # at construction so the template renders it verbatim.
-                preview_html=Markup(
+                preview_markup=Markup(
                     f'<span class="anndata-text--muted">({obj.n_items} items)</span>'
                 ),
             )
@@ -45,7 +45,7 @@ Usage for extending to new types:
             hint, data = extract_uns_type_hint(obj)
             return FormattedOutput(
                 type_name="config",
-                preview_html=Markup("<span>Custom config preview</span>"),
+                preview_markup=Markup("<span>Custom config preview</span>"),
             )
 """
 
@@ -85,33 +85,36 @@ class FormattedOutput:
         ┌─────────────┬────────────────────────────┬─────────────────┐
         │ Name        │ Type                       │ Preview         │
         ├─────────────┼────────────────────────────┼─────────────────┤
-        │ (from key)  │ type_html or type_name     │ preview_html or │
+        │ (from key)  │ type_markup or type_name     │ preview_markup or │
         │             │ + warnings + [Expand ▼]    │ preview (text)  │
         └─────────────┴────────────────────────────┴─────────────────┘
-                               │ (if expanded_html provided and clicked)
+                               │ (if expanded_markup provided and clicked)
                                ▼
                   ┌─────────────────────────────────────────────────┐
-                  │ expanded_html content (collapsible row)         │
+                  │ expanded_markup content (collapsible row)       │
                   └─────────────────────────────────────────────────┘
 
     Field precedence rules
     ----------------------
     Some fields have precedence relationships when multiple are provided:
 
-    **Type column** (``type_name`` vs ``type_html``):
+    **Type column** (``type_name`` vs ``type_markup``):
         - ``type_name`` is always required and used for search/filter (data-dtype)
-        - If ``type_html`` is provided, it replaces the visual display
+        - If ``type_markup`` is provided, it replaces the visual display
         - ``type_name`` is still used for the data-dtype attribute regardless
 
-    **Preview column** (``preview`` vs ``preview_html``):
-        - If ``preview_html`` is provided, it is used (raw HTML)
+    **Preview column** (``preview`` vs ``preview_markup``):
+        - If ``preview_markup`` is provided, it is used (raw HTML)
         - Otherwise, ``preview`` is used as plain text (auto-escaped)
         - A warning is logged if both are provided
 
     Field naming convention
     -----------------------
-    - ``*_html`` fields contain raw HTML (caller responsible for escaping)
-    - Other string fields are plain text (auto-escaped when rendered)
+    - ``*_markup`` fields carry trusted HTML as ``markupsafe.Markup``
+      (caller responsible for escaping at the boundary); they pass through
+      Jinja autoescape verbatim.
+    - Plain string fields (``type_name``, ``preview``, ``tooltip``, etc.)
+      are autoescaped when rendered.
 
     Available CSS classes
     ---------------------
@@ -136,7 +139,7 @@ class FormattedOutput:
     Always used for data-dtype attribute (search/filter). Auto-escaped.
     Defaults to 'unknown' for resilience when type extraction fails."""
 
-    type_html: Markup | None = None
+    type_markup: Markup | None = None
     """Optional. Trusted HTML (``markupsafe.Markup``) to render in the type
     column instead of ``type_name``. If provided, replaces the visual
     rendering but ``type_name`` is still used for the ``data-dtype`` attribute."""
@@ -152,14 +155,14 @@ class FormattedOutput:
 
     preview: str | None = None
     """Optional. Plain text for preview column (rightmost). Auto-escaped.
-    Mutually exclusive with preview_html."""
+    Mutually exclusive with preview_markup."""
 
-    preview_html: Markup | None = None
+    preview_markup: Markup | None = None
     """Optional. Trusted HTML (``markupsafe.Markup``) for the preview column
     (e.g., category pills with colors). Takes precedence over ``preview`` if
     both provided (with warning)."""
 
-    expanded_html: Markup | None = None
+    expanded_markup: Markup | None = None
     """Optional. Trusted HTML (``markupsafe.Markup``) for expandable content
     shown in the collapsible row below. If provided, an 'Expand ▼' button is
     added to the type column."""
@@ -171,7 +174,7 @@ class FormattedOutput:
     """Hard error message. If set, row is highlighted red and error shown in preview.
 
     **Precedence**: If ``error`` is set, it takes precedence over ``preview`` and
-    ``preview_html`` - the error message is displayed instead of any preview content.
+    ``preview_markup`` - the error message is displayed instead of any preview content.
 
     Used for: formatter failures, key validation errors, property access failures.
     Ecosystem packages can set this explicitly or just raise (caught by registry)."""
@@ -607,9 +610,9 @@ class FallbackFormatter(TypeFormatter[object]):
         except Exception:  # noqa: BLE001
             pass
 
-        # === Build preview_html for errors ===
+        # === Build preview_markup for errors ===
         # SECURITY: All text must be HTML-escaped to prevent XSS
-        preview_html = None
+        preview_markup = None
         warnings: list[str] = []
 
         # Add serialization reason to warnings if not serializable
@@ -619,11 +622,11 @@ class FallbackFormatter(TypeFormatter[object]):
         if all_errors:
             try:
                 error_text = escape_html(", ".join(all_errors))
-                preview_html = Markup(
+                preview_markup = Markup(
                     f'<span class="{CSS_TEXT_ERROR}">{error_text}</span>'
                 )
             except Exception:  # noqa: BLE001
-                preview_html = Markup(f'<span class="{CSS_TEXT_ERROR}">Error</span>')
+                preview_markup = Markup(f'<span class="{CSS_TEXT_ERROR}">Error</span>')
         else:
             # No errors - check if unknown type warning needed
             try:
@@ -636,7 +639,7 @@ class FallbackFormatter(TypeFormatter[object]):
                 if not is_extension:
                     warnings.append(f"Unknown type: {full_name}")
                     warning_text = escape_html(f"Unknown type: {full_name}")
-                    preview_html = (
+                    preview_markup = (
                         f'<span class="{CSS_TEXT_WARNING}">{warning_text}</span>'
                     )
             except Exception:  # noqa: BLE001
@@ -668,7 +671,7 @@ class FallbackFormatter(TypeFormatter[object]):
             css_class=css_class,
             tooltip=tooltip,
             warnings=warnings,
-            preview_html=preview_html,
+            preview_markup=preview_markup,
             is_serializable=is_serial,
             error=error,
         )
@@ -967,6 +970,8 @@ def extract_uns_type_hint(value: object) -> tuple[str | None, object]:
 
     1. In your package (e.g., mypackage/__init__.py), register a TypeFormatter::
 
+        from markupsafe import Markup
+
         from anndata._repr import (
             register_formatter,
             TypeFormatter,
@@ -989,7 +994,7 @@ def extract_uns_type_hint(value: object) -> tuple[str | None, object]:
                 # Render your custom visualization
                 return FormattedOutput(
                     type_name="mytype",
-                    preview_html="<span>Custom rendering</span>",
+                    preview_markup=Markup("<span>Custom rendering</span>"),
                 )
 
     2. When the user imports your package, the formatter is registered

@@ -16,8 +16,6 @@ from typing import TYPE_CHECKING
 
 from markupsafe import Markup
 
-from .environment import get_env
-
 from .._repr_constants import (
     CSS_BADGE_BACKED,
     CSS_BADGE_EXTENSION,
@@ -50,6 +48,7 @@ from .core import (
     render_x_entry,
 )
 from .css import get_css
+from .environment import get_env
 from .javascript import get_javascript
 from .lazy import get_lazy_backing_info, is_lazy_adata
 from .registry import (
@@ -302,13 +301,13 @@ def generate_repr_html(  # noqa: PLR0913
             )
         )
 
-    index_preview_html: Markup | None = None
+    index_preview_markup: Markup | None = None
     footer_html: Markup | None = None
     hints_html: Markup | None = None
     css_html: Markup | None = None
     javascript_html: Markup | None = None
     if depth == 0:
-        index_preview_html = Markup(_render_index_preview(adata))
+        index_preview_markup = Markup(_render_index_preview(adata))
         footer_html = Markup(_render_footer(adata))
         hints_html = Markup(
             '<div class="anndata-repr__hint-nocss">'
@@ -328,17 +327,21 @@ def generate_repr_html(  # noqa: PLR0913
     # Render the outer template. `container_id`, `depth`, and `style` are
     # plain strings and get autoescaped by the engine; the Markup-wrapped
     # fragments pass through verbatim.
-    return get_env().get_template("anndata.j2").render(
-        container_id=container_id,
-        depth=depth,
-        style=style,
-        css=css_html,
-        header=header_html,
-        index_preview=index_preview_html,
-        sections=sections_markup,
-        footer=footer_html,
-        hints=hints_html,
-        javascript=javascript_html,
+    return (
+        get_env()
+        .get_template("anndata.j2")
+        .render(
+            container_id=container_id,
+            depth=depth,
+            style=style,
+            css=css_html,
+            header=header_html,
+            index_preview=index_preview_markup,
+            sections=sections_markup,
+            footer=footer_html,
+            hints=hints_html,
+            javascript=javascript_html,
+        )
     )
 
 

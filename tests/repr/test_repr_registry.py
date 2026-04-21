@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from markupsafe import Markup
 
 from anndata import AnnData
 
@@ -546,7 +547,7 @@ class TestUnsRendererRegistry:
                 items = data.get("data", {})
                 return FormattedOutput(
                     type_name="test config",
-                    preview_html=f'<span class="test-custom">Items: {len(items)}</span>',
+                    preview_markup=f'<span class="test-custom">Items: {len(items)}</span>',
                 )
 
         formatter = TestConfigFormatter()
@@ -814,7 +815,7 @@ class TestFormattedEntryRendering:
                         output=FormattedOutput(
                             type_name="Expandable",
                             css_class="test",
-                            expanded_html="<div>Expanded content here</div>",
+                            expanded_markup=Markup("<div>Expanded content here</div>"),
                         ),
                     ),
                 ]
@@ -857,7 +858,9 @@ class TestFormattedEntryRendering:
                         output=FormattedOutput(
                             type_name="Inline",
                             css_class="test",
-                            preview_html="<span class='preview'>Preview content</span>",
+                            preview_markup=Markup(
+                                "<span class='preview'>Preview content</span>"
+                            ),
                         ),
                     ),
                 ]

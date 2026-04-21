@@ -68,6 +68,8 @@ The system is designed to be extensible via two registry patterns:
 
     Example - format by Python type::
 
+        from markupsafe import Markup
+
         from anndata._repr import register_formatter, TypeFormatter, FormattedOutput
 
 
@@ -82,8 +84,11 @@ The system is designed to be extensible via two registry patterns:
                 return FormattedOutput(
                     type_name=f"MyArray {obj.shape}",
                     css_class="anndata-dtype--myarray",
-                    # preview_html provides HTML for the preview column (rightmost)
-                    preview_html=f'<span class="anndata-text--muted">({obj.n_items} items)</span>',
+                    # preview_markup is typed Markup — wrap trusted HTML at
+                    # the formatter boundary so autoescape lets it through.
+                    preview_markup=Markup(
+                        f'<span class="anndata-text--muted">({obj.n_items} items)</span>'
+                    ),
                 )
 
     **Error handling**: Formatters can signal errors in two ways:
@@ -97,9 +102,11 @@ The system is designed to be extensible via two registry patterns:
        ``FormattedOutput(error="reason")`` directly. The row will be highlighted
        red and the error shown in the preview column.
 
-    When ``error`` is set, it takes precedence over ``preview`` and ``preview_html``.
+    When ``error`` is set, it takes precedence over ``preview`` and ``preview_markup``.
 
     Example - format by embedded type hint (for tagged data in uns)::
+
+        from markupsafe import Markup
 
         from anndata._repr import register_formatter, TypeFormatter, FormattedOutput
         from anndata._repr import extract_uns_type_hint
@@ -118,7 +125,7 @@ The system is designed to be extensible via two registry patterns:
                 hint, data = extract_uns_type_hint(obj)
                 return FormattedOutput(
                     type_name="config",
-                    preview_html="<span>Custom config preview</span>",
+                    preview_markup=Markup("<span>Custom config preview</span>"),
                 )
 
     Data structure for type hints (works in any section)::
@@ -288,6 +295,8 @@ their own ``_repr_html_``, you can reuse anndata's CSS, JavaScript, and helpers.
 
 **Embedding nested AnnData** with full interactivity::
 
+    from markupsafe import Markup
+
     from anndata._repr import generate_repr_html, FormattedEntry, FormattedOutput
 
     nested_html = generate_repr_html(adata, depth=1, max_depth=3)
@@ -295,7 +304,7 @@ their own ``_repr_html_``, you can reuse anndata's CSS, JavaScript, and helpers.
         key="table",
         output=FormattedOutput(
             type_name=f"AnnData ({adata.n_obs} x {adata.n_vars})",
-            expanded_html=nested_html,  # Collapsible content below the row
+            expanded_markup=Markup(nested_html),  # Collapsible content below the row
         ),
     )
 

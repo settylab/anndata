@@ -394,30 +394,30 @@ class DataFrameFormatter(TypeFormatter[pd.DataFrame]):
         n_rows, n_cols = len(df), len(df.columns)
         cols = list(df.columns)
 
-        # Build preview_html with column list for obsm/varm sections
+        # Build preview_markup with column list for obsm/varm sections
         # Uses anndata-columns class for CSS truncation and JS wrap button
-        preview_html: Markup | None = None
+        preview_markup: Markup | None = None
         if n_cols > 0 and context.section in ("obsm", "varm"):
             col_str = ", ".join(escape_html(str(c)) for c in cols)
-            preview_html = Markup(f'<span class="anndata-columns">[{col_str}]</span>')
+            preview_markup = Markup(f'<span class="anndata-columns">[{col_str}]</span>')
 
         # Check if expandable _repr_html_ is enabled
         expand_dataframes = get_setting("repr_html_dataframe_expand", default=False)
 
-        expanded_html: Markup | None = None
+        expanded_markup: Markup | None = None
         if expand_dataframes and n_rows > 0 and n_cols > 0:
             # Use pandas _repr_html_() for native Jupyter-style output
             # Respects pd.options.display settings (max_rows, max_columns, etc.)
             # Intentional broad catch: _repr_html_() can fail in many ways
             # (memory, recursion, custom dtypes, etc.) - gracefully degrade
             with contextlib.suppress(Exception):
-                expanded_html = Markup(df._repr_html_())
+                expanded_markup = Markup(df._repr_html_())
 
         return FormattedOutput(
             type_name=f"DataFrame ({format_number(n_rows)} × {format_number(n_cols)})",
             css_class=CSS_DTYPE_DATAFRAME,
-            expanded_html=expanded_html,
-            preview_html=preview_html,
+            expanded_markup=expanded_markup,
+            preview_markup=preview_markup,
             is_serializable=True,
         )
 
@@ -543,8 +543,8 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
             else f"category ({n_categories})"
         )
 
-        # Build preview_html with category list and colors
-        preview_html: Markup | None = None
+        # Build preview_markup with category list and colors
+        preview_markup: Markup | None = None
         error = None
         if context.section in ("obs", "var") and context.key is not None:
             try:
@@ -556,11 +556,11 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
                 if len(categories) == 0:
                     # Metadata-only mode or no categories: show just count
                     if n_total is not None:
-                        preview_html = Markup(
+                        preview_markup = Markup(
                             f'<span class="{CSS_TEXT_MUTED}">({n_total} categories)</span>'
                         )
                     else:
-                        preview_html = Markup(
+                        preview_markup = Markup(
                             f'<span class="{CSS_TEXT_MUTED}">(categories)</span>'
                         )
                 else:
@@ -585,7 +585,7 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
                         if (n_total and was_truncated)
                         else 0
                     )
-                    preview_html = render_category_list(
+                    preview_markup = render_category_list(
                         categories, colors, context.max_categories, n_hidden=n_hidden
                     )
             except Exception as e:  # noqa: BLE001
@@ -618,7 +618,7 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
         return FormattedOutput(
             type_name=type_name,
             css_class=CSS_DTYPE_CATEGORY,
-            preview_html=preview_html,
+            preview_markup=preview_markup,
             is_serializable=True,
             warnings=warnings,
             error=error,
@@ -890,7 +890,7 @@ class AnnDataFormatter(TypeFormatter[object]):
         shape_str = f"{format_number(obj.n_obs)} × {format_number(obj.n_vars)}"  # type: ignore[attr-defined]
 
         # Generate expanded HTML if within depth limit
-        expanded_html: Markup | None = None
+        expanded_markup: Markup | None = None
         if context.depth < context.max_depth - 1:
             # Lazy import to avoid circular dependency
             from .html import generate_repr_html
@@ -904,7 +904,7 @@ class AnnDataFormatter(TypeFormatter[object]):
                     show_search=False,
                 )
             )
-            expanded_html = Markup(
+            expanded_markup = Markup(
                 f'<div class="{CSS_NESTED_ANNDATA}">{nested_html}</div>'
             )
 
@@ -912,7 +912,7 @@ class AnnDataFormatter(TypeFormatter[object]):
             type_name=f"AnnData ({shape_str})",
             css_class=CSS_DTYPE_ANNDATA,
             tooltip="Nested AnnData object",
-            expanded_html=expanded_html,
+            expanded_markup=expanded_markup,
             is_serializable=True,
         )
 
@@ -1061,7 +1061,9 @@ class ColorListFormatter(TypeFormatter[list]):
                 f'<span class="{CSS_TEXT_MUTED}">+{n_colors - COLOR_PREVIEW_LIMIT}</span>'
             )
 
-        preview_html = Markup(f'<span class="{CSS_COLORS}">{"".join(swatches)}</span>')
+        preview_markup = Markup(
+            f'<span class="{CSS_COLORS}">{"".join(swatches)}</span>'
+        )
 
         # Build warnings list (only for colors within preview limit)
         warnings = []
@@ -1074,7 +1076,7 @@ class ColorListFormatter(TypeFormatter[list]):
         return FormattedOutput(
             type_name=f"colors ({n_colors})",
             css_class=CSS_DTYPE_OBJECT,
-            preview_html=preview_html,
+            preview_markup=preview_markup,
             is_serializable=True,
             warnings=warnings,
         )

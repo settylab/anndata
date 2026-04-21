@@ -110,15 +110,19 @@ def render_section(  # noqa: PLR0913
     # callers that already pass ``Markup`` are a no-op through the constructor.
     entries = entries_html if isinstance(entries_html, Markup) else Markup(entries_html)
 
-    rendered = get_env().get_template("section.j2").render(
-        name=name,
-        count_str=count_str,
-        doc_url=doc_url,
-        tooltip=tooltip,
-        should_collapse=should_collapse,
-        section_id=section_id,
-        n_items=n_items,
-        entries=entries,
+    rendered = (
+        get_env()
+        .get_template("section.j2")
+        .render(
+            name=name,
+            count_str=count_str,
+            doc_url=doc_url,
+            tooltip=tooltip,
+            should_collapse=should_collapse,
+            section_id=section_id,
+            n_items=n_items,
+            entries=entries,
+        )
     )
     return Markup(rendered)
 
@@ -199,7 +203,7 @@ def render_formatted_entry(
     section: str = "",
     *,
     extra_warnings: list[str] | None = None,
-    append_type_html: bool = False,
+    append_type_markup: bool = False,
     preview_note: str | None = None,
 ) -> Markup:
     """
@@ -216,8 +220,8 @@ def render_formatted_entry(
         Optional section name (used for meta column rendering)
     extra_warnings
         Additional warnings to display (e.g., key validation warnings)
-    append_type_html
-        If True, append type_html below type_name instead of replacing it.
+    append_type_markup
+        If True, append type_markup below type_name instead of replacing it.
         Used for mapping entries (obsm, varm, etc.) to show extra content.
     preview_note
         Optional note to prepend to preview text (for type hints in uns)
@@ -251,13 +255,15 @@ def render_formatted_entry(
 
     With expandable nested content::
 
+        from markupsafe import Markup
+
         nested_html = generate_repr_html(adata, depth=1)
         entry = FormattedEntry(
             key="cell_table",
             output=FormattedOutput(
                 type_name="AnnData (150 × 30)",
                 css_class=CSS_DTYPE_ANNDATA,
-                expanded_html=nested_html,
+                expanded_markup=Markup(nested_html),
             ),
         )
         html = render_formatted_entry(entry)
@@ -286,18 +292,18 @@ def render_formatted_entry(
     output = entry.output
     all_warnings = (extra_warnings or []) + list(output.warnings)
     has_error = output.error is not None or not output.is_serializable
-    has_expandable_content = output.expanded_html is not None
+    has_expandable_content = output.expanded_markup is not None
     has_categories = output.css_class == CSS_DTYPE_CATEGORY and bool(
-        output.preview_html
+        output.preview_markup
     )
     has_columns_list = output.css_class == CSS_DTYPE_DATAFRAME and bool(
-        output.preview_html
+        output.preview_markup
     )
 
-    preview_html = output.preview_html
+    preview_markup = output.preview_markup
     preview_text = output.preview
-    if output.error and not preview_html:
-        preview_html = Markup(
+    if output.error and not preview_markup:
+        preview_markup = Markup(
             f'<span class="{CSS_TEXT_ERROR}">{escape_html(output.error)}</span>'
         )
 
@@ -306,21 +312,25 @@ def render_formatted_entry(
     elif preview_note:
         preview_text = preview_note
 
-    rendered = get_env().get_template("entry.j2").render(
-        entry_key=entry.key,
-        type_name=output.type_name,
-        css_class=output.css_class,
-        type_html=output.type_html,
-        tooltip=output.tooltip,
-        all_warnings=all_warnings,
-        is_not_serializable=not output.is_serializable,
-        has_error=has_error,
-        has_expandable_content=has_expandable_content,
-        has_columns_list=has_columns_list,
-        has_categories_list=has_categories,
-        append_type_html=append_type_html,
-        preview_html=preview_html,
-        preview_text=preview_text,
-        expanded_html=output.expanded_html,
+    rendered = (
+        get_env()
+        .get_template("entry.j2")
+        .render(
+            entry_key=entry.key,
+            type_name=output.type_name,
+            css_class=output.css_class,
+            type_markup=output.type_markup,
+            tooltip=output.tooltip,
+            all_warnings=all_warnings,
+            is_not_serializable=not output.is_serializable,
+            has_error=has_error,
+            has_expandable_content=has_expandable_content,
+            has_columns_list=has_columns_list,
+            has_categories_list=has_categories,
+            append_type_markup=append_type_markup,
+            preview_markup=preview_markup,
+            preview_text=preview_text,
+            expanded_markup=output.expanded_markup,
+        )
     )
     return Markup(rendered)
