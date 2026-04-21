@@ -1509,6 +1509,7 @@ Emoji: 💀💀💀💀💀
 
         v.assert_html_well_formed()
         v.assert_element_exists(".anndata-readme__icon")
+        assert "\x00" not in html, "NUL leaked into rendered HTML"
 
 
 class TestMarkupAutoescapeContract:
@@ -1612,3 +1613,53 @@ class TestMarkupAutoescapeContract:
             )
         finally:
             formatter_registry.unregister_type_formatter(formatter)
+
+    def test_section_formatter_render_html_is_trusted(self) -> None:
+        """Document the ecosystem-extension contract: ``SectionFormatter.render_html``
+        output is trusted verbatim.
+
+        ``_render_custom_section`` wraps ``render_html`` return values in
+        ``Markup(...)`` — that is a trust assertion, not a sanitizer. An
+        extension author who returns a bare ``str`` with embedded HTML is
+        responsible for the contents being safe. This test pins the current
+        behavior so any future shift to autoescape is an explicit decision.
+        """
+        from anndata._repr.registry import (
+            FormattedEntry,
+            FormattedOutput,
+            SectionFormatter,
+            formatter_registry,
+        )
+
+        raw_html = '<div class="custom">trusted <b>raw</b> html</div>'
+
+        class _TrustedSection(SectionFormatter):
+            @property
+            def section_name(self) -> str:
+                return "_trusted_section"
+
+            def should_show(self, obj):
+                return True
+
+            def get_entries(self, obj, context):
+                return [
+                    FormattedEntry(key="ignored", output=FormattedOutput(type_name="x"))
+                ]
+
+            def render_html(self, obj, context):
+                # Bare str — anndata trusts this verbatim per the extension contract.
+                return raw_html
+
+        formatter = _TrustedSection()
+        formatter_registry.register_section_formatter(formatter)
+        try:
+            adata = AnnData(np.zeros((2, 2)))
+            html = adata._repr_html_()
+            assert raw_html in html, (
+                "render_html(str) must be passed through unmodified — "
+                "trust boundary is the SectionFormatter contract"
+            )
+        finally:
+            # No public unregister for section formatters; pop from internal dict.
+            for name in formatter.section_names:
+                formatter_registry._section_formatters.pop(name, None)

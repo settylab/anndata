@@ -11,6 +11,7 @@ This module generates the complete HTML representation by:
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import TYPE_CHECKING
 
@@ -87,6 +88,12 @@ if TYPE_CHECKING:
     from anndata import AnnData
 
     from .registry import SectionFormatter
+
+
+# container_id is interpolated verbatim into a <script> block
+# (see javascript.py: `getElementById('{container_id}')`), so any
+# caller-supplied value must match this restrictive shape.
+_CONTAINER_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
 def _collect_all_field_names(adata: AnnData) -> list[str]:
@@ -265,8 +272,20 @@ def generate_repr_html(  # noqa: PLR0913
     if depth >= context.max_depth:
         return _render_max_depth_indicator(adata)
 
-    # Generate unique container ID
-    container_id = _container_id or f"anndata-repr-{uuid.uuid4().hex[:8]}"
+    # Generate unique container ID. container_id is interpolated verbatim into
+    # a <script> block (see javascript.py), so caller-supplied values must match
+    # a restrictive pattern to prevent JS injection. Auto-generated UUIDs are
+    # safe by construction and skip the check.
+    if _container_id is not None:
+        if not _CONTAINER_ID_RE.match(_container_id):
+            msg = (
+                f"_container_id must match {_CONTAINER_ID_RE.pattern!r}; "
+                f"got {_container_id!r}"
+            )
+            raise ValueError(msg)
+        container_id = _container_id
+    else:
+        container_id = f"anndata-repr-{uuid.uuid4().hex[:8]}"
 
     # Calculate field name column width based on content
     max_field_width = get_setting(
