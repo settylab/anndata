@@ -1,0 +1,41 @@
+{# Reusable small HTML components used by entry.j2 and (later) other templates.
+
+   Trust contract (see environment.py):
+   - plain str args are autoescaped by Jinja inside `{{ … }}`
+   - Markup args pass through verbatim
+   - Globals CSS_TEXT_MUTED, NOT_SERIALIZABLE_MSG, STYLE_HIDDEN come from the
+     Environment.globals; do not hardcode their string values.
+#}
+
+{%- macro badge(text, variant='', tooltip='') -%}
+{%- if variant -%}
+<span class="anndata-badge {{ variant }}"{% if tooltip %} title="{{ tooltip }}"{% endif %}>{{ text }}</span>
+{%- else -%}
+<span class="anndata-badge"{% if tooltip %} title="{{ tooltip }}"{% endif %}>{{ text }}</span>
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro copy_button(text, tooltip='Copy') -%}
+<button class="anndata-entry__copy" style="{{ STYLE_HIDDEN }}" data-copy="{{ text }}" title="{{ tooltip }}" aria-label="{{ tooltip }}"></button>
+{%- endmacro -%}
+
+{%- macro muted_span(text) -%}
+<span class="{{ CSS_TEXT_MUTED }}">{{ text }}</span>
+{%- endmacro -%}
+
+{%- macro warning_icon(warnings, is_not_serializable=false) -%}
+{%- if warnings or is_not_serializable -%}
+{%- if is_not_serializable and warnings -%}
+{%- set title = NOT_SERIALIZABLE_MSG ~ ': ' ~ warnings | join('; ') -%}
+{%- elif is_not_serializable -%}
+{%- set title = NOT_SERIALIZABLE_MSG -%}
+{%- else -%}
+{%- set title = warnings | join('; ') -%}
+{%- endif -%}
+<span class="anndata-entry__warning" title="{{ title }}">(!)</span>
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro wrap_button(css_class) -%}
+<button class="{{ css_class }}" style="display:none" title="Expand to multi-line view">▼</button>
+{%- endmacro -%}

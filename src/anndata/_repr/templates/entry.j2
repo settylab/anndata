@@ -1,0 +1,51 @@
+{# Renders one entry row.
+
+   Trust contract:
+   - `entry_key`, `type_name`, `css_class`, `tooltip`, `preview_text` and items in
+     `all_warnings` are plain str and autoescaped inside `{{ … }}`.
+   - `type_html`, `preview_html`, `expanded_html` arrive as Markup (produced by
+     Python formatters) and pass through verbatim.
+#}
+{% from '_macros.j2' import copy_button, muted_span, warning_icon, wrap_button %}
+
+{%- set entry_classes = 'anndata-entry' -%}
+{%- if all_warnings %}{%- set entry_classes = entry_classes ~ ' warning' -%}{%- endif -%}
+{%- if has_error %}{%- set entry_classes = entry_classes ~ ' error' -%}{%- endif -%}
+
+{%- macro name_cell(entry_key) -%}
+<span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top"><span class="anndata-entry__name-inner"><span class="anndata-entry__name-text" title="{{ entry_key }}">{{ entry_key }}</span>{{ copy_button(entry_key, 'Copy name') }}</span></span>
+{%- endmacro -%}
+
+{%- macro type_cell() -%}
+<span class="anndata-entry__type" style="display:inline-block;min-width:var(--anndata-type-col-width,180px);vertical-align:top">
+{%- if type_html and not append_type_html -%}
+{{ type_html }}
+{%- elif tooltip -%}
+<span class="{{ css_class }}" title="{{ tooltip }}">{{ type_name }}</span>
+{%- else -%}
+<span class="{{ css_class }}">{{ type_name }}</span>
+{%- endif -%}
+{{ warning_icon(all_warnings, is_not_serializable) }}
+{%- if has_columns_list %}{{ wrap_button('anndata-columns__wrap') }}{% endif -%}
+{%- if has_categories_list %}{{ wrap_button('anndata-categories__wrap') }}{% endif -%}
+{%- if type_html and append_type_html -%}
+<span class="anndata-entry__custom">{{ type_html }}</span>
+{%- endif -%}
+</span>
+{%- endmacro -%}
+
+{%- macro preview_cell() -%}
+<span class="anndata-entry__preview" style="display:inline-block;vertical-align:top">
+{%- if preview_html -%}
+{{ preview_html }}
+{%- elif preview_text -%}
+{{ muted_span(preview_text) }}
+{%- endif -%}
+</span>
+{%- endmacro -%}
+
+{%- if has_expandable_content -%}
+<details class="{{ entry_classes }}" data-key="{{ entry_key }}" data-dtype="{{ type_name }}"><summary class="anndata-entry__summary">{{ name_cell(entry_key) }}{{ type_cell() }}{{ preview_cell() }}</summary><div class="anndata-entry__nested-content" style="margin-left:1.5em"><div class="anndata-entry__expanded">{{ expanded_html }}</div></div></details>
+{%- else -%}
+<div class="{{ entry_classes }}" data-key="{{ entry_key }}" data-dtype="{{ type_name }}">{{ name_cell(entry_key) }}{{ type_cell() }}{{ preview_cell() }}</div>
+{%- endif -%}

@@ -26,6 +26,14 @@ from .._repr_constants import (
 )
 
 
+def _scrub_nulls(value):
+    # Null bytes in user data break HTML parsers; replace pre-escape (mirrors
+    # utils.escape_html). Markup values pass through unchanged.
+    if isinstance(value, str) and not hasattr(value, "__html__"):
+        return value.replace("\x00", "\ufffd")
+    return value
+
+
 @cache
 def get_env() -> Environment:
     env = Environment(
@@ -33,6 +41,7 @@ def get_env() -> Environment:
         autoescape=select_autoescape(default=True, default_for_string=True),
         trim_blocks=True,
         lstrip_blocks=True,
+        finalize=_scrub_nulls,
     )
     env.globals.update(
         CSS_TEXT_ERROR=CSS_TEXT_ERROR,

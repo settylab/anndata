@@ -16,14 +16,22 @@ build compatible representations.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import cache
+
+from markupsafe import Markup
 
 from .._repr_constants import (
     CSS_ENTRY,
     CSS_TEXT_MUTED,
-    NOT_SERIALIZABLE_MSG,
     STYLE_HIDDEN,
 )
+from .environment import get_env
 from .utils import escape_html, sanitize_css_color
+
+
+@cache
+def _macros():
+    return get_env().get_template("_macros.j2").module
 
 
 def render_entry_row_open(
@@ -83,7 +91,7 @@ def render_entry_row_open(
 
 def render_warning_icon(
     warnings: list[str], *, is_not_serializable: bool = False
-) -> str:
+) -> Markup:
     """Render warning icon with tooltip if there are warnings or serialization issues.
 
     Parameters
@@ -95,26 +103,9 @@ def render_warning_icon(
 
     Returns
     -------
-    HTML string for warning icon, or empty string if no warnings.
+    ``Markup`` HTML for warning icon, or empty ``Markup`` if no warnings.
     """
-    if not warnings and not is_not_serializable:
-        return ""
-
-    # Build the tooltip message
-    if is_not_serializable:
-        if warnings:
-            # "Not serializable: reason1; reason2"
-            reasons = "; ".join(warnings)
-            title = f"{NOT_SERIALIZABLE_MSG}: {reasons}"
-        else:
-            # Just "Not serializable to H5AD/Zarr"
-            title = NOT_SERIALIZABLE_MSG
-    else:
-        # Independent warnings joined with ";"
-        title = "; ".join(warnings)
-
-    title = escape_html(title)
-    return f'<span class="anndata-entry__warning" title="{title}">(!)</span>'
+    return Markup(_macros().warning_icon(warnings or [], is_not_serializable))
 
 
 def render_search_box(container_id: str = "") -> str:
@@ -160,7 +151,7 @@ def render_search_box(container_id: str = "") -> str:
     )
 
 
-def render_copy_button(text: str, tooltip: str = "Copy") -> str:
+def render_copy_button(text: str, tooltip: str = "Copy") -> Markup:
     """
     Render a copy-to-clipboard button.
 
@@ -176,51 +167,45 @@ def render_copy_button(text: str, tooltip: str = "Copy") -> str:
 
     Returns
     -------
-    HTML string for the copy button
+    ``Markup`` HTML for the copy button
 
     Example
     -------
     >>> name = "gene_expression"
     >>> html = f"<span>{name}</span>{render_copy_button(name, 'Copy name')}"
     """
-    escaped_text = escape_html(text)
-    escaped_tooltip = escape_html(tooltip)
-    return (
-        f'<button class="anndata-entry__copy" style="{STYLE_HIDDEN}" '
-        f'data-copy="{escaped_text}" title="{escaped_tooltip}" '
-        f'aria-label="{escaped_tooltip}"></button>'
-    )
+    return Markup(_macros().copy_button(text, tooltip))
 
 
-def _render_wrap_button(css_class: str) -> str:
+def _render_wrap_button(css_class: str) -> Markup:
     """Render a wrap toggle button with the specified CSS class.
 
     Internal helper used by render_categories_wrap_button and render_columns_wrap_button.
     """
-    return f'<button class="{css_class}" style="display:none" title="Expand to multi-line view">▼</button>'
+    return Markup(_macros().wrap_button(css_class))
 
 
-def render_categories_wrap_button() -> str:
+def render_categories_wrap_button() -> Markup:
     """Render a button to toggle category list between single-line and multi-line.
 
     Returns
     -------
-    HTML string for the wrap button (▼ expands, ▲ collapses)
+    ``Markup`` HTML for the wrap button (▼ expands, ▲ collapses)
     """
     return _render_wrap_button("anndata-categories__wrap")
 
 
-def render_columns_wrap_button() -> str:
+def render_columns_wrap_button() -> Markup:
     """Render a button to toggle column list between single-line and multi-line.
 
     Returns
     -------
-    HTML string for the wrap button (▼ expands, ▲ collapses)
+    ``Markup`` HTML for the wrap button (▼ expands, ▲ collapses)
     """
     return _render_wrap_button("anndata-columns__wrap")
 
 
-def render_muted_span(text: str) -> str:
+def render_muted_span(text: str) -> Markup:
     """Render text in a muted span (gray color).
 
     Parameters
@@ -230,9 +215,9 @@ def render_muted_span(text: str) -> str:
 
     Returns
     -------
-    HTML string with muted styling
+    ``Markup`` HTML with muted styling
     """
-    return f'<span class="{CSS_TEXT_MUTED}">{escape_html(text)}</span>'
+    return Markup(_macros().muted_span(text))
 
 
 def render_nested_content(html_content: str) -> str:
@@ -264,7 +249,7 @@ def render_badge(
     text: str,
     variant: str = "",
     tooltip: str = "",
-) -> str:
+) -> Markup:
     """
     Render a badge (pill-shaped label).
 
@@ -285,17 +270,13 @@ def render_badge(
 
     Returns
     -------
-    HTML string for the badge
+    ``Markup`` HTML for the badge
 
     Example
     -------
     >>> badge = render_badge("Zarr", "anndata-badge--backed", "Backed by Zarr store")
     """
-    escaped_text = escape_html(text)
-    title_attr = f' title="{escape_html(tooltip)}"' if tooltip else ""
-    # Always include base class, optionally add variant
-    css_class = f"anndata-badge {variant}".strip() if variant else "anndata-badge"
-    return f'<span class="{css_class}"{title_attr}>{escaped_text}</span>'
+    return Markup(_macros().badge(text, variant, tooltip))
 
 
 def render_header_badges(
@@ -305,7 +286,7 @@ def render_header_badges(
     is_lazy: bool = False,
     backing_path: str | None = None,
     backing_format: str | None = None,
-) -> str:
+) -> Markup:
     """
     Render standard header badges for view/backed/lazy status.
 
@@ -324,7 +305,7 @@ def render_header_badges(
 
     Returns
     -------
-    HTML string with badges
+    ``Markup`` HTML with badges
 
     Example
     -------
@@ -334,7 +315,7 @@ def render_header_badges(
     ...     backing_format="Zarr",
     ... )
     """
-    parts = []
+    parts: list[Markup] = []
     if is_view:
         parts.append(
             render_badge(
@@ -351,7 +332,7 @@ def render_header_badges(
                 "Lazy", "anndata-badge--lazy", "Lazy loading (experimental read_lazy)"
             )
         )
-    return "".join(parts)
+    return Markup("").join(parts)
 
 
 def render_name_cell(name: str) -> str:
@@ -386,7 +367,7 @@ def render_category_list(
     max_cats: int,
     *,
     n_hidden: int = 0,
-) -> str:
+) -> Markup:
     """Render a list of category values with optional color dots.
 
     Parameters
@@ -430,7 +411,7 @@ def render_category_list(
     if total_hidden > 0:
         parts.append(f'<span class="{CSS_TEXT_MUTED}">...+{total_hidden}</span>')
     parts.append("</span>")
-    return "".join(parts)
+    return Markup("".join(parts))
 
 
 @dataclass

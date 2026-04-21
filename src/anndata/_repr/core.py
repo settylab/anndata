@@ -21,14 +21,6 @@ from .._repr_constants import (
     CSS_TEXT_ERROR,
     CSS_TEXT_MUTED,
 )
-from .components import (
-    TypeCellConfig,
-    render_entry_preview_cell,
-    render_entry_row_open,
-    render_entry_type_cell,
-    render_name_cell,
-    render_nested_content,
-)
 from .environment import get_env
 from .registry import formatter_registry
 from .utils import escape_html, format_number
@@ -209,7 +201,7 @@ def render_formatted_entry(
     extra_warnings: list[str] | None = None,
     append_type_html: bool = False,
     preview_note: str | None = None,
-) -> str:
+) -> Markup:
     """
     Render a FormattedEntry as a table row.
 
@@ -232,7 +224,7 @@ def render_formatted_entry(
 
     Returns
     -------
-    HTML string for the table row(s)
+    ``Markup`` HTML for the table row(s)
 
     Examples
     --------
@@ -292,15 +284,9 @@ def render_formatted_entry(
         html = render_formatted_entry(entry)
     """
     output = entry.output
-    extra_warnings = extra_warnings or []
-
-    # Compute entry CSS classes
-    # Both hard errors and serialization issues get red background
-    all_warnings = extra_warnings + list(output.warnings)
+    all_warnings = (extra_warnings or []) + list(output.warnings)
     has_error = output.error is not None or not output.is_serializable
-
     has_expandable_content = output.expanded_html is not None
-    # Detect wrap button needs from output css_class
     has_categories = output.css_class == CSS_DTYPE_CATEGORY and bool(
         output.preview_html
     )
@@ -308,62 +294,42 @@ def render_formatted_entry(
         output.preview_html
     )
 
-    # Build row using consolidated helper
-    parts = [
-        render_entry_row_open(
-            entry.key,
-            output.type_name,
-            has_warnings=bool(all_warnings),
-            is_error=has_error,
-            has_expandable_content=has_expandable_content,
-        )
-    ]
-
-    # Name cell
-    parts.append(render_name_cell(entry.key))
-
-    # Type cell
-    type_cell_config = TypeCellConfig(
-        type_name=output.type_name,
-        css_class=output.css_class,
-        type_html=output.type_html if append_type_html else None,
-        tooltip=output.tooltip,
-        warnings=all_warnings,
-        is_not_serializable=not output.is_serializable,
-        has_columns_list=has_columns_list,
-        has_categories_list=has_categories,
-        append_type_html=append_type_html,
-    )
-    parts.append(render_entry_type_cell(type_cell_config))
-
-    # Preview cell
-    # Error takes precedence over preview/preview_html
     preview_html = output.preview_html
     preview_text = output.preview
-
     if output.error and not preview_html:
-        # Generate error preview if error is set but no preview_html provided
-        error_text = escape_html(output.error)
-        preview_html = f'<span class="{CSS_TEXT_ERROR}">{error_text}</span>'
+        preview_html = Markup(
+            f'<span class="{CSS_TEXT_ERROR}">{escape_html(output.error)}</span>'
+        )
 
     if preview_note and preview_text:
         preview_text = f"{preview_note} {preview_text}"
     elif preview_note:
         preview_text = preview_note
 
-    parts.append(
-        render_entry_preview_cell(
-            preview_html=preview_html,
-            preview_text=preview_text,
-        )
+    # Pre-rendered HTML fragments (produced by Python formatters) arrive as
+    # plain str; wrap in Markup so the template trust contract holds.
+    type_html = Markup(output.type_html) if output.type_html else None
+    if isinstance(preview_html, str) and not isinstance(preview_html, Markup):
+        preview_html = Markup(preview_html)
+    expanded_html = (
+        Markup(output.expanded_html) if output.expanded_html else None
     )
 
-    # Expandable entries use <details>/<summary>; render_nested_content
-    # closes the <summary> and adds the nested content div.
-    if has_expandable_content:
-        parts.append(render_nested_content(output.expanded_html))
-        parts.append("</details>")
-    else:
-        parts.append("</div>")
-
-    return "\n".join(parts)
+    rendered = get_env().get_template("entry.j2").render(
+        entry_key=entry.key,
+        type_name=output.type_name,
+        css_class=output.css_class,
+        type_html=type_html,
+        tooltip=output.tooltip,
+        all_warnings=all_warnings,
+        is_not_serializable=not output.is_serializable,
+        has_error=has_error,
+        has_expandable_content=has_expandable_content,
+        has_columns_list=has_columns_list,
+        has_categories_list=has_categories,
+        append_type_html=append_type_html,
+        preview_html=preview_html,
+        preview_text=preview_text,
+        expanded_html=expanded_html,
+    )
+    return Markup(rendered)
