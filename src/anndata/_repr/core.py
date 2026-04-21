@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from markupsafe import Markup
+
 from .._repr_constants import (
     CSS_DTYPE_CATEGORY,
     CSS_DTYPE_DATAFRAME,
@@ -27,6 +29,7 @@ from .components import (
     render_name_cell,
     render_nested_content,
 )
+from .environment import get_env
 from .registry import formatter_registry
 from .utils import escape_html, format_number
 
@@ -36,7 +39,7 @@ if TYPE_CHECKING:
 
 def render_section(  # noqa: PLR0913
     name: str,
-    entries_html: str,
+    entries_html: str | Markup,
     *,
     n_items: int,
     doc_url: str | None = None,
@@ -44,7 +47,7 @@ def render_section(  # noqa: PLR0913
     should_collapse: bool = False,
     section_id: str | None = None,
     count_str: str | None = None,
-) -> str:
+) -> Markup:
     """
     Render a complete section with header and content.
 
@@ -56,7 +59,8 @@ def render_section(  # noqa: PLR0913
     name
         Display name for the section header (e.g., 'images', 'tables')
     entries_html
-        HTML content for the section body (table rows)
+        HTML content for the section body (table rows). ``Markup`` passes
+        through; ``str`` is escaped.
     n_items
         Number of items (used for empty check and default count string)
     doc_url
@@ -72,7 +76,7 @@ def render_section(  # noqa: PLR0913
 
     Returns
     -------
-    HTML string for the complete section
+    ``Markup`` HTML for the complete section.
 
     Examples
     --------
@@ -106,78 +110,41 @@ def render_section(  # noqa: PLR0913
     """
     if section_id is None:
         section_id = name
-
-    if n_items == 0:
-        return render_empty_section(name, doc_url, tooltip)
-
     if count_str is None:
         count_str = f"({n_items} items)"
 
-    open_attr = " open" if not should_collapse else ""
-    parts = [
-        f'<details class="anndata-section" data-section="{escape_html(section_id)}"{open_attr}>'
-    ]
+    # Existing internal callers produce trusted HTML fragments as ``str``.
+    # Autoescape would break that, so we wrap bare ``str`` in ``Markup``;
+    # callers that already pass ``Markup`` are a no-op through the constructor.
+    entries = entries_html if isinstance(entries_html, Markup) else Markup(entries_html)
 
-    # Header
-    parts.append(_render_section_header(name, count_str, doc_url, tooltip))
-
-    # Content
-    parts.append('<div class="anndata-section__content">')
-    parts.append('<div class="anndata-section__entries">')
-    parts.append(entries_html)
-    parts.append("</div></div></details>")
-
-    return "\n".join(parts)
-
-
-def _render_section_header(
-    name: str,
-    count_str: str,
-    doc_url: str | None,
-    tooltip: str,
-) -> str:
-    """Render a section header as <summary> - native disclosure triangle replaces fold icon."""
-    parts = ["<summary>"]
-    parts.append(f'<span class="anndata-section__name">{escape_html(name)}</span>')
-    parts.append(
-        f'<span class="anndata-section__count">{escape_html(count_str)}</span>'
+    rendered = get_env().get_template("section.j2").render(
+        name=name,
+        count_str=count_str,
+        doc_url=doc_url,
+        tooltip=tooltip,
+        should_collapse=should_collapse,
+        section_id=section_id,
+        n_items=n_items,
+        entries=entries,
     )
-    if doc_url:
-        parts.append(
-            f'<a class="anndata-section__help"  href="{escape_html(doc_url)}" target="_blank" title="{escape_html(tooltip)}">?</a>'
-        )
-    parts.append("</summary>")
-    return "\n".join(parts)
+    return Markup(rendered)
 
 
 def render_empty_section(
     name: str,
     doc_url: str | None = None,
     tooltip: str = "",
-) -> str:
+) -> Markup:
     """Render an empty section indicator."""
-    # Build help link if doc_url provided
-    help_link = ""
-    if doc_url:
-        help_link = f'<a class="anndata-section__help"  href="{escape_html(doc_url)}" target="_blank" title="{escape_html(tooltip)}">?</a>'
-
-    return f"""
-<details class="anndata-section" data-section="{escape_html(name)}">
-    <summary>
-        <span class="anndata-section__name">{escape_html(name)}</span>
-        <span class="anndata-section__count">(empty)</span>
-        {help_link}
-    </summary>
-    <div class="anndata-section__content">
-        <div class="anndata-section__empty">No entries</div>
-    </div>
-</details>
-"""
+    return render_section(name, "", n_items=0, doc_url=doc_url, tooltip=tooltip)
 
 
-def render_truncation_indicator(remaining: int) -> str:
+def render_truncation_indicator(remaining: int) -> Markup:
     """Render a truncation indicator."""
-    return f'<div class="anndata-section__truncated">... and {format_number(remaining)} more</div>'
+    return Markup(
+        f'<div class="anndata-section__truncated">... and {format_number(remaining)} more</div>'
+    )
 
 
 def get_section_tooltip(section: str) -> str:

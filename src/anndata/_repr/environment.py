@@ -1,21 +1,15 @@
 """
-Jinja2 Environment for the AnnData HTML repr (middle-ground POC).
+Jinja2 Environment for the AnnData HTML repr.
 
-This module wires Jinja2 into the existing repr pipeline in a minimal way:
+The repr renders by feeding structured values (plus pre-produced HTML
+fragments wrapped in ``markupsafe.Markup``) into templates loaded from
+``anndata._repr.templates``. Autoescape is on by default:
 
-- A single autoescape-enabled ``Environment`` loads templates from
-  ``anndata._repr.templates``.
-- The existing formatter machinery still produces HTML fragments as strings;
-  the top-level renderer wraps those fragments in ``markupsafe.Markup`` at the
-  boundary so they pass through autoescape verbatim.
-- Any additional values injected directly into the outer template (container
-  id, depth, inline style, etc.) are autoescaped by default, which closes the
-  "forgot to call ``html.escape()``" class of bug for those specific
-  insertions.
+- Plain ``str`` values are escaped (``<``, ``>``, ``&``, ``"``, ``'``).
+- ``Markup`` values pass through verbatim because Jinja recognises the type.
 
-This is deliberately narrow in scope. It illustrates the trust contract
-(``Markup`` = trusted, ``str`` = untrusted) without rewriting the per-type
-formatters.
+The trust contract is therefore typed rather than conventional: data arrives
+as ``str`` and gets escaped; HTML arrives as ``Markup`` and is trusted.
 """
 
 from __future__ import annotations
@@ -24,12 +18,26 @@ from functools import cache
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
+from .._repr_constants import (
+    CSS_TEXT_ERROR,
+    CSS_TEXT_MUTED,
+    NOT_SERIALIZABLE_MSG,
+    STYLE_HIDDEN,
+)
+
 
 @cache
 def get_env() -> Environment:
-    return Environment(
+    env = Environment(
         loader=PackageLoader("anndata._repr", "templates"),
         autoescape=select_autoescape(default=True, default_for_string=True),
         trim_blocks=True,
         lstrip_blocks=True,
     )
+    env.globals.update(
+        CSS_TEXT_ERROR=CSS_TEXT_ERROR,
+        CSS_TEXT_MUTED=CSS_TEXT_MUTED,
+        NOT_SERIALIZABLE_MSG=NOT_SERIALIZABLE_MSG,
+        STYLE_HIDDEN=STYLE_HIDDEN,
+    )
+    return env
