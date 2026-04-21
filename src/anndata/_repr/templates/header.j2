@@ -13,13 +13,13 @@
    Role: assemble `<div class="anndata-header">…</div>`.
 #}
 <div class="anndata-header">
-<span class="anndata-header__type">{{ type_name }}</span>
-<span class="anndata-header__shape">{{ shape_str }}</span>
-{%- for extra in extras %}
-{{ extra }}
-{%- endfor %}
-{%- if search_box is not none %}
-<span class="anndata-spacer"></span>
-{{ search_box }}
-{%- endif %}
+  <span class="anndata-header__type">{{ type_name }}</span>
+  <span class="anndata-header__shape">{{ shape_str }}</span>
+  {%- for extra in extras %}
+  {{ extra }}
+  {%- endfor %}
+  {%- if search_box is not none %}
+  <span class="anndata-spacer"></span>
+  {{ search_box }}
+  {%- endif %}
 </div>

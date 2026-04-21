@@ -42,6 +42,16 @@
 <button class="{{ css_class }}" style="display:none" title="Expand to multi-line view">▼</button>
 {%- endmacro -%}
 
+{# File-path span: <span class="anndata-header__filepath">{path}</span> with
+   optional inline style. Used in the header next to backed/lazy badges. #}
+{%- macro filepath_span(path, style='') -%}
+{%- if style -%}
+<span class="anndata-header__filepath" style="{{ style }}">{{ path }}</span>
+{%- else -%}
+<span class="anndata-header__filepath">{{ path }}</span>
+{%- endif -%}
+{%- endmacro -%}
+
 {# Name cell: first column of an entry row. Shows the key with a copy button. #}
 {%- macro name_cell(entry_key) -%}
 <span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top"><span class="anndata-entry__name-inner"><span class="anndata-entry__name-text" title="{{ entry_key }}">{{ entry_key }}</span>{{ copy_button(entry_key, 'Copy name') }}</span></span>

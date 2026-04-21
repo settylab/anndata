@@ -46,6 +46,7 @@ from . import (
 )
 from .components import (
     render_badge,
+    render_filepath_span,
     render_search_box,
 )
 from .core import (
@@ -546,11 +547,7 @@ def _render_header(
         status = "Open" if backing.get("is_open") else "Closed"
         extras.append(render_badge(f"{format_str} ({status})", CSS_BADGE_BACKED))
         if filename:
-            extras.append(
-                Markup('<span class="anndata-header__filepath">{}</span>').format(
-                    filename
-                )
-            )
+            extras.append(render_filepath_span(filename))
 
     if is_lazy_adata(adata):
         lazy_info = get_lazy_backing_info(adata)
@@ -565,11 +562,7 @@ def _render_header(
                 "font-family:ui-monospace,monospace;font-size:11px;"
                 "color:var(--anndata-text-secondary, #6c757d);"
             )
-            extras.append(
-                Markup(
-                    '<span class="anndata-header__filepath" style="{}">{}</span>'
-                ).format(path_style, lazy_filename)
-            )
+            extras.append(render_filepath_span(lazy_filename, path_style))
 
     if type_name != "AnnData":
         extras.append(render_badge(type_name, CSS_BADGE_EXTENSION))
@@ -609,15 +602,13 @@ def _render_footer(adata: AnnData) -> Markup:
 
 def _render_index_preview(adata: AnnData) -> Markup:
     """Render preview of obs_names and var_names."""
-    # format_index_preview returns a plain str that already contains escaped HTML
-    # (e.g. "<em>empty</em>" and escape_html'd items), so wrap as Markup to avoid
-    # double-escaping when it passes through the template.
-    obs_preview = Markup(format_index_preview(adata.obs_names, DEFAULT_PREVIEW_ITEMS))
-    var_preview = Markup(format_index_preview(adata.var_names, DEFAULT_PREVIEW_ITEMS))
     return Markup(
         get_env()
         .get_template("index_preview.j2")
-        .render(obs_preview=obs_preview, var_preview=var_preview)
+        .render(
+            obs_preview=format_index_preview(adata.obs_names, DEFAULT_PREVIEW_ITEMS),
+            var_preview=format_index_preview(adata.var_names, DEFAULT_PREVIEW_ITEMS),
+        )
     )
 
 

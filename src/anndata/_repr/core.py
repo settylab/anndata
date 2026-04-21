@@ -115,7 +115,7 @@ def render_section(  # noqa: PLR0913
     if section_id is None:
         section_id = name
     if count_str is None:
-        count_str = f"({n_items} items)"
+        count_str = "(empty)" if n_items == 0 else f"({n_items} items)"
 
     return Markup(
         get_env()

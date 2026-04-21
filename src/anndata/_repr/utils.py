@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 import numpy as np
+from markupsafe import Markup
 
 from .._repr_constants import (
     DICT_PREVIEW_KEYS,
@@ -506,8 +507,8 @@ def _get_colors_from_uns(
     return _compute_if_dask(colors)
 
 
-def format_index_preview(index: pd.Index, preview_n: int = 5) -> str:
-    """Format a preview of a pandas Index.
+def format_index_preview(index: pd.Index, preview_n: int = 5) -> Markup:
+    """Format a preview of a pandas Index as trusted HTML.
 
     Shows first and last items with ellipsis in between for long indices.
     Handles bytes index values (from older h5ad files) by decoding them.
@@ -521,29 +522,31 @@ def format_index_preview(index: pd.Index, preview_n: int = 5) -> str:
 
     Returns
     -------
-    Comma-separated preview string, or ``<em>empty</em>`` for empty indices.
+    ``Markup`` with the comma-separated preview, or ``<em>empty</em>``
+    for empty indices. Each item is autoescaped by ``Markup.join``.
     """
     n = len(index)
     if n == 0:
-        return "<em>empty</em>"
+        return Markup("<em>empty</em>")
 
     def _format_value(x: object) -> str:
-        """Format a single index value, decoding bytes if needed."""
         if isinstance(x, bytes):
             try:
                 return x.decode("utf-8")
             except UnicodeDecodeError:
                 return x.decode("latin-1")
-        return str(x)
+        return str(x).replace("\x00", "\ufffd")
 
     if n <= preview_n * 2:
-        items = [escape_html(_format_value(x)) for x in index]
+        items: list[str | Markup] = [_format_value(x) for x in index]
     else:
-        first = [escape_html(_format_value(x)) for x in index[:preview_n]]
-        last = [escape_html(_format_value(x)) for x in index[-preview_n:]]
-        items = [*first, "...", *last]
+        items = [
+            *(_format_value(x) for x in index[:preview_n]),
+            Markup("..."),
+            *(_format_value(x) for x in index[-preview_n:]),
+        ]
 
-    return ", ".join(items)
+    return Markup(", ").join(items)
 
 
 def escape_html(text: str) -> str:

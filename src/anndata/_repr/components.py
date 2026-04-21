@@ -72,9 +72,7 @@ def render_entry_row_open(
     if is_error:
         classes.append("error")
     css_class = " ".join(classes)
-    return Markup(
-        _macros().row_open(key, dtype, css_class, has_expandable_content)
-    )
+    return Markup(_macros().row_open(key, dtype, css_class, has_expandable_content))
 
 
 def render_warning_icon(
@@ -197,6 +195,23 @@ def render_muted_span(text: str) -> Markup:
     ``Markup`` HTML with muted styling
     """
     return Markup(_macros().muted_span(text))
+
+
+def render_filepath_span(path: str, style: str = "") -> Markup:
+    """Render a ``<span class="anndata-header__filepath">`` for backed/lazy files.
+
+    Parameters
+    ----------
+    path
+        File path to display (autoescaped).
+    style
+        Optional inline style (trusted CSS, not escaped).
+
+    Returns
+    -------
+    ``Markup`` HTML for the filepath span.
+    """
+    return Markup(_macros().filepath_span(path, style))
 
 
 def render_nested_content(html_content: str | Markup) -> Markup:

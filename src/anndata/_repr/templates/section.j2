@@ -6,6 +6,8 @@
    `entries` is expected to be Markup (pre-rendered HTML).
    `extra_classes` is an optional str of additional CSS classes
    (e.g. "anndata-sec-unknown") appended to the root <details>.
+   `count_str` is emitted verbatim whether n_items is zero or not —
+   callers pick (empty), (N items), (N columns), ... as appropriate.
 #}
 {%- macro section_header(name, count_str, doc_url, tooltip) -%}
 <summary>
@@ -19,7 +21,7 @@
 {%- set root_class = 'anndata-section' ~ (' ' ~ extra_classes if extra_classes else '') -%}
 {%- if n_items == 0 -%}
 <details class="{{ root_class }}" data-section="{{ section_id }}">
-  {{ section_header(name, '(empty)', doc_url, tooltip) }}
+  {{ section_header(name, count_str, doc_url, tooltip) }}
   <div class="anndata-section__content">
     <div class="anndata-section__empty">No entries</div>
   </div>

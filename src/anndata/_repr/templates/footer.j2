@@ -8,8 +8,8 @@
    Role: produce `<div class="anndata-footer">`.
 #}
 <div class="anndata-footer">
-<span>anndata v{{ version }}</span>
-{%- if memory_str is not none %}
-<span title="Estimated memory usage">~{{ memory_str }}</span>
-{%- endif %}
+  <span>anndata v{{ version }}</span>
+  {%- if memory_str is not none %}
+  <span title="Estimated memory usage">~{{ memory_str }}</span>
+  {%- endif %}
 </div>
