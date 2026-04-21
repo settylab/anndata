@@ -1509,3 +1509,106 @@ Emoji: 💀💀💀💀💀
 
         v.assert_html_well_formed()
         v.assert_element_exists(".anndata-readme__icon")
+
+
+class TestMarkupAutoescapeContract:
+    """Verify the Markup trust boundary is enforced by Jinja autoescape.
+
+    FormattedOutput.{type_markup, preview_markup, expanded_markup} are typed
+    ``Markup | None``. An ecosystem extension that violates the contract by
+    passing a bare ``str`` with HTML must get its input autoescaped —
+    the trust boundary is a type-level assertion, not a convention.
+
+    These tests deliberately violate the contract to prove the safety net.
+    """
+
+    ATTACK = '<script>alert("xss")</script>'
+    ESCAPED = "&lt;script&gt;alert(&#34;xss&#34;)&lt;/script&gt;"
+
+    def _register_and_render(self, *, field: str) -> str:
+        """Register a one-off TypeFormatter that sets ``field`` to bare str and render."""
+        from anndata._repr.registry import (
+            FormattedOutput,
+            TypeFormatter,
+            register_formatter,
+        )
+
+        attack = self.ATTACK
+
+        class _ContractViolator(TypeFormatter):
+            priority = 10000  # beat every built-in formatter
+
+            def can_format(self, obj, context):
+                return isinstance(obj, _ContractViolator._Sentinel)
+
+            def format(self, obj, context):
+                # Bare str — violates the Markup | None contract.
+                return FormattedOutput(type_name="violator", **{field: attack})
+
+            class _Sentinel:
+                pass
+
+        formatter = _ContractViolator()
+        register_formatter(formatter)
+        try:
+            adata = AnnData(np.zeros((2, 2)))
+            adata.uns["evil"] = _ContractViolator._Sentinel()
+            return adata._repr_html_()
+        finally:
+            formatter_registry.unregister_type_formatter(formatter)
+
+    def test_bare_str_preview_markup_is_escaped(self) -> None:
+        html = self._register_and_render(field="preview_markup")
+        assert self.ATTACK not in html, (
+            "bare str preview_markup leaked raw — autoescape failed"
+        )
+        assert self.ESCAPED in html
+
+    def test_bare_str_type_markup_is_escaped(self) -> None:
+        html = self._register_and_render(field="type_markup")
+        assert self.ATTACK not in html
+        assert self.ESCAPED in html
+
+    def test_bare_str_expanded_markup_is_escaped(self) -> None:
+        html = self._register_and_render(field="expanded_markup")
+        assert self.ATTACK not in html
+        assert self.ESCAPED in html
+
+    def test_markup_wrapped_preview_passes_through(self) -> None:
+        """Positive control: ``Markup`` input flows through autoescape verbatim."""
+        from markupsafe import Markup
+
+        from anndata._repr.registry import (
+            FormattedOutput,
+            TypeFormatter,
+            register_formatter,
+        )
+
+        safe_html = '<span class="trusted-preview">hello</span>'
+
+        class _TrustedFormatter(TypeFormatter):
+            priority = 10000
+
+            def can_format(self, obj, context):
+                return isinstance(obj, _TrustedFormatter._Sentinel)
+
+            def format(self, obj, context):
+                return FormattedOutput(
+                    type_name="trusted",
+                    preview_markup=Markup(safe_html),
+                )
+
+            class _Sentinel:
+                pass
+
+        formatter = _TrustedFormatter()
+        register_formatter(formatter)
+        try:
+            adata = AnnData(np.zeros((2, 2)))
+            adata.uns["ok"] = _TrustedFormatter._Sentinel()
+            html = adata._repr_html_()
+            assert safe_html in html, (
+                "Markup-wrapped preview did not pass through verbatim"
+            )
+        finally:
+            formatter_registry.unregister_type_formatter(formatter)
