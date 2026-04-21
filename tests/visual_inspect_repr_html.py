@@ -656,10 +656,13 @@ try:
                 # render_formatted_entry() creates the table row HTML
                 rows.append(render_formatted_entry(entry))
 
-            # render_section() wraps rows in a collapsible section
+            # render_section() wraps rows in a collapsible section.
+            # Use Markup("\n").join so the joined result stays Markup — a
+            # plain str.join(...) would yield a bare str that Jinja autoescapes
+            # when render_section interpolates it.
             return render_section(
                 "images",
-                "\n".join(rows),
+                Markup("\n").join(rows),
                 n_items=len(self.images),
                 tooltip="Image data (xarray.DataArray)",
             )
@@ -683,7 +686,7 @@ try:
 
             return render_section(
                 "labels",
-                "\n".join(rows),
+                Markup("\n").join(rows),
                 n_items=len(self.labels),
                 tooltip="Segmentation masks (xarray.DataArray)",
             )
@@ -708,7 +711,7 @@ try:
 
             return render_section(
                 "points",
-                "\n".join(rows),
+                Markup("\n").join(rows),
                 n_items=len(self.points),
                 tooltip="Point annotations (dask.DataFrame)",
             )
@@ -733,7 +736,7 @@ try:
 
             return render_section(
                 "shapes",
-                "\n".join(rows),
+                Markup("\n").join(rows),
                 n_items=len(self.shapes),
                 tooltip="Vector shapes (geopandas.GeoDataFrame)",
             )
@@ -770,7 +773,7 @@ try:
 
             return render_section(
                 "tables",
-                "\n".join(rows),
+                Markup("\n").join(rows),
                 n_items=len(self.tables),
                 tooltip="Annotation tables (AnnData)",
             )
@@ -801,7 +804,7 @@ try:
                 rows = [render_formatted_entry(entry) for entry in entries]
                 section_html = render_section(
                     formatter.section_name,
-                    "\n".join(rows),
+                    Markup("\n").join(rows),
                     n_items=len(entries),
                     tooltip=getattr(formatter, "tooltip", ""),
                 )
