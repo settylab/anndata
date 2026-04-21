@@ -1,0 +1,15 @@
+{# AnnData footer block.
+
+   Inputs:
+   - version (str): anndata version string.
+   - memory_str (str | None): human-readable memory size (e.g. "1.2 MB"); omitted
+     when sizeof computation failed.
+
+   Role: produce `<div class="anndata-footer">`.
+#}
+<div class="anndata-footer">
+<span>anndata v{{ version }}</span>
+{%- if memory_str is not none %}
+<span title="Estimated memory usage">~{{ memory_str }}</span>
+{%- endif %}
+</div>

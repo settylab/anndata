@@ -301,16 +301,7 @@ def generate_repr_html(  # noqa: PLR0913
     if depth == 0:
         index_preview_markup = _render_index_preview(adata)
         footer_html = _render_footer(adata)
-        hints_html = Markup(
-            '<div class="anndata-repr__hint-nocss">'
-            "<em>Styled representation available in Jupyter and trusted notebooks "
-            "(colors, search, type highlighting).</em>"
-            "</div>"
-            '<div class="anndata-repr__hint-nojs" style="display:none">'
-            "<em>Interactive features (search, copy, category wrapping) "
-            "require JavaScript. Trust this notebook to enable them.</em>"
-            "</div>"
-        )
+        hints_html = _render_hints()
         css_html = Markup(get_css())
         javascript_html = Markup(get_javascript(container_id))
 
@@ -498,31 +489,64 @@ def _render_custom_section(
     )
 
 
+def _build_readme_icon(adata: AnnData) -> Markup | None:
+    """Build the README icon Markup from ``adata.uns['README']`` if present.
+
+    The truncation + tooltip shaping stays in Python; only the final Markup
+    fragment is handed off to the template.
+    """
+    readme_content = adata.uns.get("README") if hasattr(adata, "uns") else None
+    if not (isinstance(readme_content, str) and readme_content.strip()):
+        return None
+
+    max_readme_size = get_setting(
+        "repr_html_max_readme_size", default=DEFAULT_MAX_README_SIZE
+    )
+    original_len = len(readme_content)
+    if max_readme_size > 0 and original_len > max_readme_size:
+        readme_content = readme_content[:max_readme_size]
+        truncation_note = (
+            f"\n\n---\n*README truncated: showing {max_readme_size:,} of "
+            f"{original_len:,} characters*"
+        )
+        readme_content += truncation_note
+
+    tooltip_text = readme_content[:TOOLTIP_TRUNCATE_LENGTH]
+    if len(readme_content) > TOOLTIP_TRUNCATE_LENGTH:
+        tooltip_text += "..."
+
+    return Markup(
+        '<span class="anndata-readme__icon" '
+        'data-readme="{}" '
+        'title="{}" '
+        'role="button" tabindex="0" aria-label="View README">'
+        "ⓘ"
+        "</span>"
+    ).format(readme_content, tooltip_text)
+
+
 def _render_header(
     adata: AnnData, *, show_search: bool = False, container_id: str = ""
 ) -> Markup:
     """Render the header with type, shape, badges, and optional search box."""
-    parts: list[Markup] = [Markup('<div class="anndata-header">')]
-
     type_name = type(adata).__name__
-    parts.append(
-        Markup('<span class="anndata-header__type">{}</span>').format(type_name)
-    )
-
     shape_str = f"{format_number(adata.n_obs)} obs × {format_number(adata.n_vars)} vars"
-    parts.append(Markup(f'<span class="anndata-header__shape">{shape_str}</span>'))
+
+    # `extras` preserves the original interleaving: badges and their associated
+    # filepath spans ship in the same list, in insertion order.
+    extras: list[Markup] = []
 
     if is_view(adata):
-        parts.append(render_badge("View", CSS_BADGE_VIEW))
+        extras.append(render_badge("View", CSS_BADGE_VIEW))
 
     if is_backed(adata):
         backing = get_backing_info(adata)
         filename = backing.get("filename", "")
         format_str = backing.get("format", "")
         status = "Open" if backing.get("is_open") else "Closed"
-        parts.append(render_badge(f"{format_str} ({status})", CSS_BADGE_BACKED))
+        extras.append(render_badge(f"{format_str} ({status})", CSS_BADGE_BACKED))
         if filename:
-            parts.append(
+            extras.append(
                 Markup('<span class="anndata-header__filepath">{}</span>').format(
                     filename
                 )
@@ -532,90 +556,74 @@ def _render_header(
         lazy_info = get_lazy_backing_info(adata)
         lazy_format = lazy_info.get("format", "")
         if lazy_format:
-            parts.append(render_badge(f"Lazy ({lazy_format})", CSS_BADGE_LAZY))
+            extras.append(render_badge(f"Lazy ({lazy_format})", CSS_BADGE_LAZY))
         else:
-            parts.append(render_badge("Lazy", CSS_BADGE_LAZY))
+            extras.append(render_badge("Lazy", CSS_BADGE_LAZY))
         lazy_filename = lazy_info.get("filename", "")
         if lazy_filename:
             path_style = (
                 "font-family:ui-monospace,monospace;font-size:11px;"
                 "color:var(--anndata-text-secondary, #6c757d);"
             )
-            parts.append(
+            extras.append(
                 Markup(
                     '<span class="anndata-header__filepath" style="{}">{}</span>'
                 ).format(path_style, lazy_filename)
             )
 
     if type_name != "AnnData":
-        parts.append(render_badge(type_name, CSS_BADGE_EXTENSION))
+        extras.append(render_badge(type_name, CSS_BADGE_EXTENSION))
 
-    readme_content = adata.uns.get("README") if hasattr(adata, "uns") else None
-    if isinstance(readme_content, str) and readme_content.strip():
-        max_readme_size = get_setting(
-            "repr_html_max_readme_size", default=DEFAULT_MAX_README_SIZE
+    readme_icon = _build_readme_icon(adata)
+    if readme_icon is not None:
+        extras.append(readme_icon)
+
+    search_box = render_search_box(container_id) if show_search else None
+
+    return Markup(
+        get_env()
+        .get_template("header.j2")
+        .render(
+            type_name=type_name,
+            shape_str=shape_str,
+            extras=extras,
+            search_box=search_box,
         )
-        original_len = len(readme_content)
-        if max_readme_size > 0 and original_len > max_readme_size:
-            readme_content = readme_content[:max_readme_size]
-            truncation_note = (
-                f"\n\n---\n*README truncated: showing {max_readme_size:,} of "
-                f"{original_len:,} characters*"
-            )
-            readme_content += truncation_note
-
-        tooltip_text = readme_content[:TOOLTIP_TRUNCATE_LENGTH]
-        if len(readme_content) > TOOLTIP_TRUNCATE_LENGTH:
-            tooltip_text += "..."
-
-        parts.append(
-            Markup(
-                '<span class="anndata-readme__icon" '
-                'data-readme="{}" '
-                'title="{}" '
-                'role="button" tabindex="0" aria-label="View README">'
-                "ⓘ"
-                "</span>"
-            ).format(readme_content, tooltip_text)
-        )
-
-    if show_search:
-        parts.append(Markup('<span class="anndata-spacer"></span>'))
-        parts.append(render_search_box(container_id))
-
-    parts.append(Markup("</div>"))
-    return Markup("\n").join(parts)
+    )
 
 
 def _render_footer(adata: AnnData) -> Markup:
     """Render the footer with version and memory info."""
-    parts: list[Markup] = [Markup('<div class="anndata-footer">')]
-
-    parts.append(Markup("<span>anndata v{}</span>").format(get_anndata_version()))
-
     try:
-        mem_str = format_memory_size(adata.__sizeof__())
-        parts.append(
-            Markup('<span title="Estimated memory usage">~{}</span>').format(mem_str)
-        )
+        memory_str: str | None = format_memory_size(adata.__sizeof__())
     except Exception:  # noqa: BLE001
         # __sizeof__ recurses into user data which can raise anything
-        pass
+        memory_str = None
 
-    parts.append(Markup("</div>"))
-    return Markup("\n").join(parts)
+    return Markup(
+        get_env()
+        .get_template("footer.j2")
+        .render(version=get_anndata_version(), memory_str=memory_str)
+    )
 
 
 def _render_index_preview(adata: AnnData) -> Markup:
     """Render preview of obs_names and var_names."""
-    obs_preview = format_index_preview(adata.obs_names, DEFAULT_PREVIEW_ITEMS)
-    var_preview = format_index_preview(adata.var_names, DEFAULT_PREVIEW_ITEMS)
+    # format_index_preview returns a plain str that already contains escaped HTML
+    # (e.g. "<em>empty</em>" and escape_html'd items), so wrap as Markup to avoid
+    # double-escaping when it passes through the template.
+    obs_preview = Markup(format_index_preview(adata.obs_names, DEFAULT_PREVIEW_ITEMS))
+    var_preview = Markup(format_index_preview(adata.var_names, DEFAULT_PREVIEW_ITEMS))
     return Markup(
-        '<div class="anndata-header__index">\n'
-        f"<div><strong>obs_names:</strong> {obs_preview}</div>\n"
-        f"<div><strong>var_names:</strong> {var_preview}</div>\n"
-        "</div>"
+        get_env()
+        .get_template("index_preview.j2")
+        .render(obs_preview=obs_preview, var_preview=var_preview)
     )
+
+
+def _render_hints() -> Markup:
+    """Render the static no-CSS / no-JS hint block."""
+    return Markup(get_env().get_template("hints.j2").render())
 
 
 def _render_max_depth_indicator(adata: AnnData) -> Markup:
@@ -623,5 +631,7 @@ def _render_max_depth_indicator(adata: AnnData) -> Markup:
     n_obs = getattr(adata, "n_obs", "?")
     n_vars = getattr(adata, "n_vars", "?")
     return Markup(
-        f'<div class="anndata-depth-limit">AnnData ({format_number(n_obs)} × {format_number(n_vars)}) - max depth reached</div>'
+        get_env()
+        .get_template("max_depth_indicator.j2")
+        .render(n_obs_str=format_number(n_obs), n_vars_str=format_number(n_vars))
     )
