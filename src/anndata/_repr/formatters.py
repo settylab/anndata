@@ -57,7 +57,6 @@ from .registry import (
 from .utils import (
     check_color_category_mismatch,
     check_invalid_colors,
-    escape_html,
     format_invalid_colors_warning,
     format_number,
     get_categories_for_display,
@@ -398,8 +397,9 @@ class DataFrameFormatter(TypeFormatter[pd.DataFrame]):
         # Uses anndata-columns class for CSS truncation and JS wrap button
         preview_markup: Markup | None = None
         if n_cols > 0 and context.section in ("obsm", "varm"):
-            col_str = ", ".join(escape_html(str(c)) for c in cols)
-            preview_markup = Markup(f'<span class="anndata-columns">[{col_str}]</span>')
+            preview_markup = Markup('<span class="anndata-columns">[{}]</span>').format(
+                Markup(", ").join(str(c) for c in cols)
+            )
 
         # Check if expandable _repr_html_ is enabled
         expand_dataframes = get_setting("repr_html_dataframe_expand", default=False)
@@ -1037,30 +1037,34 @@ class ColorListFormatter(TypeFormatter[list]):
         n_colors = len(colors)
 
         # Build color swatch HTML with sanitized colors, counting invalid ones
-        swatches = []
+        swatches: list[Markup] = []
         invalid_count = 0
         for color in colors[:COLOR_PREVIEW_LIMIT]:
             # Sanitize color to prevent CSS injection
             safe_color = sanitize_css_color(str(color))
             if safe_color:
                 swatches.append(
-                    f'<span class="{CSS_COLORS_SWATCH}" '
-                    f'style="background:{safe_color}" title="{escape_html(str(color))}"></span>'
+                    Markup(
+                        '<span class="{}" style="background:{}" title="{}"></span>'
+                    ).format(CSS_COLORS_SWATCH, safe_color, str(color))
                 )
             else:
                 # Invalid/unsafe color - show as text only, no style
                 invalid_count += 1
                 swatches.append(
-                    f'<span class="{CSS_COLORS_SWATCH} {CSS_COLORS_SWATCH_INVALID}" '
-                    f"""title="Invalid color: '{escape_html(str(color))}'">?</span>"""
+                    Markup(
+                        '<span class="{} {}" title="Invalid color: \'{}\'">?</span>'
+                    ).format(CSS_COLORS_SWATCH, CSS_COLORS_SWATCH_INVALID, str(color))
                 )
         if n_colors > COLOR_PREVIEW_LIMIT:
             swatches.append(
-                f'<span class="{CSS_TEXT_MUTED}">+{n_colors - COLOR_PREVIEW_LIMIT}</span>'
+                Markup('<span class="{}">+{}</span>').format(
+                    CSS_TEXT_MUTED, n_colors - COLOR_PREVIEW_LIMIT
+                )
             )
 
-        preview_markup = Markup(
-            f'<span class="{CSS_COLORS}">{"".join(swatches)}</span>'
+        preview_markup = Markup('<span class="{}">{}</span>').format(
+            CSS_COLORS, Markup("").join(swatches)
         )
 
         # Build warnings list (only for colors within preview limit)

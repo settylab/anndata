@@ -59,7 +59,6 @@ from .registry import (
     formatter_registry,
 )
 from .utils import (
-    escape_html,
     format_index_preview,
     format_number,
 )
@@ -351,8 +350,9 @@ def _render_unknown_sections(unknown_sections: list[tuple[str, str]]) -> Markup:
         parts.append(render_name_cell(attr_name))
         parts.append('<span class="anndata-entry__type">')
         parts.append(
-            f'<span class="{CSS_DTYPE_UNKNOWN}" title="Unrecognized attribute">'
-            f"{escape_html(type_desc)}</span>"
+            Markup('<span class="{}" title="Unrecognized attribute">{}</span>').format(
+                CSS_DTYPE_UNKNOWN, type_desc
+            )
         )
         parts.append("</span>")
         parts.append('<span class="anndata-entry__preview"></span>')
@@ -370,20 +370,19 @@ def _render_error_entry(section: str, error: str) -> Markup:
     error_str = str(error)
     if len(error_str) > ERROR_TRUNCATE_LENGTH:
         error_str = error_str[:ERROR_TRUNCATE_LENGTH] + "..."
-    error_escaped = escape_html(error_str)
-    return Markup(f"""
-<details class="anndata-section anndata-sec-error" data-section="{escape_html(section)}" open>
+    return Markup("""
+<details class="anndata-section anndata-sec-error" data-section="{section}" open>
     <summary>
-        <span class="anndata-section__name">{escape_html(section)}</span>
+        <span class="anndata-section__name">{section}</span>
         <span class="anndata-section__count anndata-badge--error">(error)</span>
     </summary>
     <div class="anndata-section__content">
         <div class="anndata-entry--error">
-            Failed to render: {error_escaped}
+            Failed to render: {error_str}
         </div>
     </div>
 </details>
-""")
+""").format(section=section, error_str=error_str)
 
 
 # -----------------------------------------------------------------------------

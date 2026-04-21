@@ -72,7 +72,6 @@ from .sections import (
     _render_uns_section,
 )
 from .utils import (
-    escape_html,
     format_index_preview,
     format_memory_size,
     format_number,
@@ -249,7 +248,7 @@ def generate_repr_html(  # noqa: PLR0913
     """
     # Check if HTML repr is enabled
     if not get_setting("repr_html_enabled", default=True):
-        return f"<pre>{escape_html(repr(adata))}</pre>"
+        return Markup("<pre>{}</pre>").format(repr(adata))
 
     # Create formatter context (resolves settings)
     context = _create_formatter_context(
@@ -507,7 +506,7 @@ def _render_header(
 
     type_name = type(adata).__name__
     parts.append(
-        Markup(f'<span class="anndata-header__type">{escape_html(type_name)}</span>')
+        Markup('<span class="anndata-header__type">{}</span>').format(type_name)
     )
 
     shape_str = f"{format_number(adata.n_obs)} obs × {format_number(adata.n_vars)} vars"
@@ -524,8 +523,8 @@ def _render_header(
         parts.append(render_badge(f"{format_str} ({status})", CSS_BADGE_BACKED))
         if filename:
             parts.append(
-                Markup(
-                    f'<span class="anndata-header__filepath">{escape_html(filename)}</span>'
+                Markup('<span class="anndata-header__filepath">{}</span>').format(
+                    filename
                 )
             )
 
@@ -544,10 +543,8 @@ def _render_header(
             )
             parts.append(
                 Markup(
-                    f'<span class="anndata-header__filepath" style="{path_style}">'
-                    f"{escape_html(lazy_filename)}"
-                    f"</span>"
-                )
+                    '<span class="anndata-header__filepath" style="{}">{}</span>'
+                ).format(path_style, lazy_filename)
             )
 
     if type_name != "AnnData":
@@ -567,21 +564,19 @@ def _render_header(
             )
             readme_content += truncation_note
 
-        escaped_readme = escape_html(readme_content)
         tooltip_text = readme_content[:TOOLTIP_TRUNCATE_LENGTH]
         if len(readme_content) > TOOLTIP_TRUNCATE_LENGTH:
             tooltip_text += "..."
-        escaped_tooltip = escape_html(tooltip_text)
 
         parts.append(
             Markup(
-                f'<span class="anndata-readme__icon" '
-                f'data-readme="{escaped_readme}" '
-                f'title="{escaped_tooltip}" '
-                f'role="button" tabindex="0" aria-label="View README">'
-                f"ⓘ"
-                f"</span>"
-            )
+                '<span class="anndata-readme__icon" '
+                'data-readme="{}" '
+                'title="{}" '
+                'role="button" tabindex="0" aria-label="View README">'
+                "ⓘ"
+                "</span>"
+            ).format(readme_content, tooltip_text)
         )
 
     if show_search:

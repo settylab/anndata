@@ -26,7 +26,7 @@ from .._repr_constants import (
     STYLE_HIDDEN,
 )
 from .environment import get_env
-from .utils import escape_html, sanitize_css_color
+from .utils import sanitize_css_color
 
 
 @cache
@@ -77,16 +77,13 @@ def render_entry_row_open(
         classes.append("error")
     css_class = " ".join(classes)
 
-    escaped_key = escape_html(key)
-    escaped_dtype = escape_html(dtype)
-
     if has_expandable_content:
         return Markup(
-            f'<details class="{css_class}" data-key="{escaped_key}" data-dtype="{escaped_dtype}">'
-            f'<summary class="anndata-entry__summary">'
-        )
-    return Markup(
-        f'<div class="{css_class}" data-key="{escaped_key}" data-dtype="{escaped_dtype}">'
+            '<details class="{}" data-key="{}" data-dtype="{}">'
+            '<summary class="anndata-entry__summary">'
+        ).format(css_class, key, dtype)
+    return Markup('<div class="{}" data-key="{}" data-dtype="{}">').format(
+        css_class, key, dtype
     )
 
 
@@ -126,23 +123,21 @@ def render_search_box(container_id: str = "") -> Markup:
     -------
     ``Markup`` HTML for the search box.
     """
-    search_id = escape_html(
-        f"{container_id}-search" if container_id else "anndata-search"
-    )
+    search_id = f"{container_id}-search" if container_id else "anndata-search"
     return Markup(
-        f'<span class="anndata-search__box" style="{STYLE_HIDDEN}">'
-        f'<input type="text" id="{search_id}" name="{search_id}" '
-        f'class="anndata-search__input" '
-        f'placeholder="Search..." aria-label="Search fields">'
-        f'<span class="anndata-search__toggles">'
-        f'<button type="button" class="anndata-search__toggle anndata-search__toggle--case" '
-        f'title="Match case" aria-label="Match case" aria-pressed="false">Aa</button>'
-        f'<button type="button" class="anndata-search__toggle anndata-search__toggle--regex" '
-        f'title="Use regular expression" aria-label="Use regular expression" aria-pressed="false">.*</button>'
-        f"</span>"
-        f"</span>"
-        f'<span class="anndata-search__indicator"></span>'
-    )
+        '<span class="anndata-search__box" style="{style}">'
+        '<input type="text" id="{sid}" name="{sid}" '
+        'class="anndata-search__input" '
+        'placeholder="Search..." aria-label="Search fields">'
+        '<span class="anndata-search__toggles">'
+        '<button type="button" class="anndata-search__toggle anndata-search__toggle--case" '
+        'title="Match case" aria-label="Match case" aria-pressed="false">Aa</button>'
+        '<button type="button" class="anndata-search__toggle anndata-search__toggle--regex" '
+        'title="Use regular expression" aria-label="Use regular expression" aria-pressed="false">.*</button>'
+        "</span>"
+        "</span>"
+        '<span class="anndata-search__indicator"></span>'
+    ).format(style=STYLE_HIDDEN, sid=search_id)
 
 
 def render_copy_button(text: str, tooltip: str = "Copy") -> Markup:
@@ -346,15 +341,14 @@ def render_name_cell(name: str) -> Markup:
     -------
     ``Markup`` HTML for the cell span.
     """
-    escaped_name = escape_html(name)
     return Markup(
-        f'<span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top">'
-        f'<span class="anndata-entry__name-inner">'
-        f'<span class="anndata-entry__name-text" title="{escaped_name}">{escaped_name}</span>'
-        f"{render_copy_button(name, 'Copy name')}"
-        f"</span>"
-        f"</span>"
-    )
+        '<span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top">'
+        '<span class="anndata-entry__name-inner">'
+        '<span class="anndata-entry__name-text" title="{name}">{name}</span>'
+        "{copy_btn}"
+        "</span>"
+        "</span>"
+    ).format(name=name, copy_btn=render_copy_button(name, "Copy name"))
 
 
 def render_category_list(
@@ -382,32 +376,37 @@ def render_category_list(
     -------
     HTML string for the category list
     """
-    parts = ['<span class="anndata-categories">']
+    parts: list[Markup] = [Markup('<span class="anndata-categories">')]
     for i, cat in enumerate(categories[:max_cats]):
         if i > 0:
-            parts.append('<span class="anndata-categories__sep">, </span>')
-        cat_name = escape_html(str(cat))
+            parts.append(Markup('<span class="anndata-categories__sep">, </span>'))
         color = colors[i] if colors and i < len(colors) else None
-        parts.append('<span class="anndata-categories__item">')
+        parts.append(Markup('<span class="anndata-categories__item">'))
         if color:
             # Sanitize color to prevent CSS injection
             safe_color = sanitize_css_color(str(color))
             if safe_color:
                 parts.append(
-                    f'<span class="anndata-categories__dot" style="background:{safe_color};"></span>'
+                    Markup(
+                        '<span class="anndata-categories__dot" style="background:{};"></span>'
+                    ).format(safe_color)
                 )
             # Skip color dot if color is invalid/unsafe
-        parts.append(f"<span>{cat_name}</span>")
-        parts.append("</span>")
+        parts.append(Markup("<span>{}</span>").format(str(cat)))
+        parts.append(Markup("</span>"))
 
     # Calculate total hidden: from max_cats truncation + lazy truncation
     hidden_from_max_cats = max(0, len(categories) - max_cats)
     total_hidden = hidden_from_max_cats + n_hidden
 
     if total_hidden > 0:
-        parts.append(f'<span class="{CSS_TEXT_MUTED}">...+{total_hidden}</span>')
-    parts.append("</span>")
-    return Markup("".join(parts))
+        parts.append(
+            Markup('<span class="{}">...+{}</span>').format(
+                CSS_TEXT_MUTED, total_hidden
+            )
+        )
+    parts.append(Markup("</span>"))
+    return Markup("").join(parts)
 
 
 @dataclass
@@ -518,15 +517,12 @@ def render_entry_type_cell(config: TypeCellConfig) -> Markup:
         parts.append(type_markup)
     elif tooltip:
         parts.append(
-            Markup(
-                f'<span class="{css_class}" title="{escape_html(tooltip)}">'
-                f"{escape_html(type_name)}</span>"
+            Markup('<span class="{}" title="{}">{}</span>').format(
+                css_class, tooltip, type_name
             )
         )
     else:
-        parts.append(
-            Markup(f'<span class="{css_class}">{escape_html(type_name)}</span>')
-        )
+        parts.append(Markup('<span class="{}">{}</span>').format(css_class, type_name))
 
     parts.append(
         render_warning_icon(warnings or [], is_not_serializable=is_not_serializable)

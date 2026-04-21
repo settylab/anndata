@@ -73,7 +73,7 @@ from .._repr_constants import (
     DEFAULT_MAX_STRING_LENGTH,
     DEFAULT_UNIQUE_LIMIT,
 )
-from .utils import escape_html, validate_key
+from .utils import validate_key
 
 
 @dataclass
@@ -621,12 +621,13 @@ class FallbackFormatter(TypeFormatter[object]):
 
         if all_errors:
             try:
-                error_text = escape_html(", ".join(all_errors))
-                preview_markup = Markup(
-                    f'<span class="{CSS_TEXT_ERROR}">{error_text}</span>'
+                preview_markup = Markup('<span class="{}">{}</span>').format(
+                    CSS_TEXT_ERROR, ", ".join(all_errors)
                 )
             except Exception:  # noqa: BLE001
-                preview_markup = Markup(f'<span class="{CSS_TEXT_ERROR}">Error</span>')
+                preview_markup = Markup('<span class="{}">Error</span>').format(
+                    CSS_TEXT_ERROR
+                )
         else:
             # No errors - check if unknown type warning needed
             try:
@@ -638,9 +639,8 @@ class FallbackFormatter(TypeFormatter[object]):
                 ))
                 if not is_extension:
                     warnings.append(f"Unknown type: {full_name}")
-                    warning_text = escape_html(f"Unknown type: {full_name}")
-                    preview_markup = (
-                        f'<span class="{CSS_TEXT_WARNING}">{warning_text}</span>'
+                    preview_markup = Markup('<span class="{}">{}</span>').format(
+                        CSS_TEXT_WARNING, f"Unknown type: {full_name}"
                     )
             except Exception:  # noqa: BLE001
                 pass

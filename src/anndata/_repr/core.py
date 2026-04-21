@@ -23,7 +23,7 @@ from .._repr_constants import (
 )
 from .environment import get_env
 from .registry import formatter_registry
-from .utils import escape_html, format_number
+from .utils import format_number
 
 if TYPE_CHECKING:
     from .registry import FormattedEntry, FormatterContext
@@ -174,8 +174,8 @@ def render_x_entry(obj: object, context: FormatterContext) -> Markup:
     except Exception as e:  # noqa: BLE001
         error_msg = f"error: {type(e).__name__}"
         parts.append(
-            Markup(
-                f'<span class="{CSS_TEXT_MUTED}"><em>({escape_html(error_msg)})</em></span>'
+            Markup('<span class="{}"><em>({})</em></span>').format(
+                CSS_TEXT_MUTED, error_msg
             )
         )
         parts.append(Markup("</div>"))
@@ -187,15 +187,15 @@ def render_x_entry(obj: object, context: FormatterContext) -> Markup:
         try:
             output = formatter_registry.format_value(X, context)
             parts.append(
-                Markup(
-                    f'<span class="{output.css_class}">{escape_html(output.type_name)}</span>'
+                Markup('<span class="{}">{}</span>').format(
+                    output.css_class, output.type_name
                 )
             )
         except Exception as e:  # noqa: BLE001
             error_msg = f"error formatting: {type(e).__name__}"
             parts.append(
-                Markup(
-                    f'<span class="{CSS_TEXT_MUTED}"><em>({escape_html(error_msg)})</em></span>'
+                Markup('<span class="{}"><em>({})</em></span>').format(
+                    CSS_TEXT_MUTED, error_msg
                 )
             )
 
@@ -308,8 +308,8 @@ def render_formatted_entry(
     preview_markup = output.preview_markup
     preview_text = output.preview
     if output.error and not preview_markup:
-        preview_markup = Markup(
-            f'<span class="{CSS_TEXT_ERROR}">{escape_html(output.error)}</span>'
+        preview_markup = Markup('<span class="{}">{}</span>').format(
+            CSS_TEXT_ERROR, output.error
         )
 
     if preview_note and preview_text:
