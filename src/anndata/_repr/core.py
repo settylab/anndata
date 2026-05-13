@@ -13,22 +13,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from markupsafe import Markup
+
 from .._repr_constants import (
     CSS_DTYPE_CATEGORY,
     CSS_DTYPE_DATAFRAME,
-    CSS_TEXT_ERROR,
-    CSS_TEXT_MUTED,
 )
-from .components import (
-    TypeCellConfig,
-    render_entry_preview_cell,
-    render_entry_row_open,
-    render_entry_type_cell,
-    render_name_cell,
-    render_nested_content,
-)
+from .environment import get_env, get_macros
 from .registry import formatter_registry
-from .utils import escape_html, format_number
+from .utils import format_number
 
 if TYPE_CHECKING:
     from .registry import FormattedEntry, FormatterContext
@@ -36,7 +29,7 @@ if TYPE_CHECKING:
 
 def render_section(  # noqa: PLR0913
     name: str,
-    entries_html: str,
+    entries: Markup,
     *,
     n_items: int,
     doc_url: str | None = None,
@@ -44,7 +37,8 @@ def render_section(  # noqa: PLR0913
     should_collapse: bool = False,
     section_id: str | None = None,
     count_str: str | None = None,
-) -> str:
+    extra_classes: str = "",
+) -> Markup:
     """
     Render a complete section with header and content.
 
@@ -55,8 +49,10 @@ def render_section(  # noqa: PLR0913
     ----------
     name
         Display name for the section header (e.g., 'images', 'tables')
-    entries_html
-        HTML content for the section body (table rows)
+    entries
+        Trusted HTML (``markupsafe.Markup``) for the section body.
+        Typically produced by joining per-entry ``Markup`` values,
+        e.g. ``Markup("\\n").join(render_formatted_entry(e) for e in entries)``.
     n_items
         Number of items (used for empty check and default count string)
     doc_url
@@ -72,11 +68,13 @@ def render_section(  # noqa: PLR0913
 
     Returns
     -------
-    HTML string for the complete section
+    ``Markup`` HTML for the complete section.
 
     Examples
     --------
     ::
+
+        from markupsafe import Markup
 
         from anndata._repr import (
             CSS_DTYPE_NDARRAY,
@@ -86,19 +84,21 @@ def render_section(  # noqa: PLR0913
             render_section,
         )
 
-        rows = []
-        for key, info in items.items():
-            entry = FormattedEntry(
-                key=key,
-                output=FormattedOutput(
-                    type_name=info["type"], css_class=CSS_DTYPE_NDARRAY
-                ),
+        rows = [
+            render_formatted_entry(
+                FormattedEntry(
+                    key=key,
+                    output=FormattedOutput(
+                        type_name=info["type"], css_class=CSS_DTYPE_NDARRAY
+                    ),
+                )
             )
-            rows.append(render_formatted_entry(entry))
+            for key, info in items.items()
+        ]
 
         html = render_section(
             "images",
-            "\\n".join(rows),
+            Markup("\\n").join(rows),
             n_items=len(items),
             doc_url="https://docs.example.com/images",
             tooltip="Image data",
@@ -106,78 +106,38 @@ def render_section(  # noqa: PLR0913
     """
     if section_id is None:
         section_id = name
-
-    if n_items == 0:
-        return render_empty_section(name, doc_url, tooltip)
-
     if count_str is None:
-        count_str = f"({n_items} items)"
+        count_str = "(empty)" if n_items == 0 else f"({n_items} items)"
 
-    open_attr = " open" if not should_collapse else ""
-    parts = [
-        f'<details class="anndata-section" data-section="{escape_html(section_id)}"{open_attr}>'
-    ]
-
-    # Header
-    parts.append(_render_section_header(name, count_str, doc_url, tooltip))
-
-    # Content
-    parts.append('<div class="anndata-section__content">')
-    parts.append('<div class="anndata-section__entries">')
-    parts.append(entries_html)
-    parts.append("</div></div></details>")
-
-    return "\n".join(parts)
-
-
-def _render_section_header(
-    name: str,
-    count_str: str,
-    doc_url: str | None,
-    tooltip: str,
-) -> str:
-    """Render a section header as <summary> - native disclosure triangle replaces fold icon."""
-    parts = ["<summary>"]
-    parts.append(f'<span class="anndata-section__name">{escape_html(name)}</span>')
-    parts.append(
-        f'<span class="anndata-section__count">{escape_html(count_str)}</span>'
-    )
-    if doc_url:
-        parts.append(
-            f'<a class="anndata-section__help"  href="{escape_html(doc_url)}" target="_blank" title="{escape_html(tooltip)}">?</a>'
+    return Markup(
+        get_env()
+        .get_template("section.j2")
+        .render(
+            name=name,
+            count_str=count_str,
+            doc_url=doc_url,
+            tooltip=tooltip,
+            should_collapse=should_collapse,
+            section_id=section_id,
+            n_items=n_items,
+            entries=entries,
+            extra_classes=extra_classes,
         )
-    parts.append("</summary>")
-    return "\n".join(parts)
+    )
 
 
 def render_empty_section(
     name: str,
     doc_url: str | None = None,
     tooltip: str = "",
-) -> str:
+) -> Markup:
     """Render an empty section indicator."""
-    # Build help link if doc_url provided
-    help_link = ""
-    if doc_url:
-        help_link = f'<a class="anndata-section__help"  href="{escape_html(doc_url)}" target="_blank" title="{escape_html(tooltip)}">?</a>'
-
-    return f"""
-<details class="anndata-section" data-section="{escape_html(name)}">
-    <summary>
-        <span class="anndata-section__name">{escape_html(name)}</span>
-        <span class="anndata-section__count">(empty)</span>
-        {help_link}
-    </summary>
-    <div class="anndata-section__content">
-        <div class="anndata-section__empty">No entries</div>
-    </div>
-</details>
-"""
+    return render_section(name, Markup(""), n_items=0, doc_url=doc_url, tooltip=tooltip)
 
 
-def render_truncation_indicator(remaining: int) -> str:
+def render_truncation_indicator(remaining: int) -> Markup:
     """Render a truncation indicator."""
-    return f'<div class="anndata-section__truncated">... and {format_number(remaining)} more</div>'
+    return Markup(get_macros().truncation_indicator(format_number(remaining)))
 
 
 def get_section_tooltip(section: str) -> str:
@@ -196,43 +156,45 @@ def get_section_tooltip(section: str) -> str:
     return tooltips.get(section, "")
 
 
-def render_x_entry(obj: object, context: FormatterContext) -> str:
+def render_x_entry(obj: object, context: FormatterContext) -> Markup:
     """Render X as a single compact entry row.
 
     Works with AnnData, Raw, and any object with an X attribute.
     Handles missing or broken X attributes gracefully.
     """
-    parts = ['<div class="anndata-x__entry">']
-    parts.append("<span>X</span>")
+    state = "ok"
+    type_name = ""
+    css_class = ""
+    error_msg = ""
 
     try:
         X = obj.X
     except Exception as e:  # noqa: BLE001
-        # Handle missing or broken X attribute gracefully
+        state = "attribute_error"
         error_msg = f"error: {type(e).__name__}"
-        parts.append(
-            f'<span class="{CSS_TEXT_MUTED}"><em>({escape_html(error_msg)})</em></span>'
-        )
-        parts.append("</div>")
-        return "\n".join(parts)
-
-    if X is None:
-        parts.append("<span><em>None</em></span>")
     else:
-        # Format the X matrix (formatter includes all info like sparsity, on disk, etc.)
-        try:
-            output = formatter_registry.format_value(X, context)
-            parts.append(
-                f'<span class="{output.css_class}">{escape_html(output.type_name)}</span>'
-            )
-        except Exception as e:  # noqa: BLE001
-            error_msg = f"error formatting: {type(e).__name__}"
-            parts.append(
-                f'<span class="{CSS_TEXT_MUTED}"><em>({escape_html(error_msg)})</em></span>'
-            )
+        if X is None:
+            state = "none"
+        else:
+            try:
+                output = formatter_registry.format_value(X, context)
+                type_name = output.type_name
+                css_class = output.css_class
+            except Exception as e:  # noqa: BLE001
+                state = "format_error"
+                error_msg = f"error formatting: {type(e).__name__}"
 
-    parts.append("</div>")
-    return "\n".join(parts)
+    return Markup(
+        get_env()
+        .get_template("x_entry.j2")
+        .render(
+            x_label="X",
+            state=state,
+            type_name=type_name,
+            css_class=css_class,
+            error_msg=error_msg,
+        )
+    )
 
 
 def render_formatted_entry(
@@ -240,9 +202,9 @@ def render_formatted_entry(
     section: str = "",
     *,
     extra_warnings: list[str] | None = None,
-    append_type_html: bool = False,
+    append_type_markup: bool = False,
     preview_note: str | None = None,
-) -> str:
+) -> Markup:
     """
     Render a FormattedEntry as a table row.
 
@@ -257,15 +219,15 @@ def render_formatted_entry(
         Optional section name (used for meta column rendering)
     extra_warnings
         Additional warnings to display (e.g., key validation warnings)
-    append_type_html
-        If True, append type_html below type_name instead of replacing it.
+    append_type_markup
+        If True, append type_markup below type_name instead of replacing it.
         Used for mapping entries (obsm, varm, etc.) to show extra content.
     preview_note
         Optional note to prepend to preview text (for type hints in uns)
 
     Returns
     -------
-    HTML string for the table row(s)
+    ``Markup`` HTML for the table row(s)
 
     Examples
     --------
@@ -292,13 +254,13 @@ def render_formatted_entry(
 
     With expandable nested content::
 
-        nested_html = generate_repr_html(adata, depth=1)
+        # generate_repr_html already returns Markup — no wrap needed.
         entry = FormattedEntry(
             key="cell_table",
             output=FormattedOutput(
                 type_name="AnnData (150 × 30)",
                 css_class=CSS_DTYPE_ANNDATA,
-                expanded_html=nested_html,
+                expanded_markup=generate_repr_html(adata, depth=1),
             ),
         )
         html = render_formatted_entry(entry)
@@ -325,78 +287,45 @@ def render_formatted_entry(
         html = render_formatted_entry(entry)
     """
     output = entry.output
-    extra_warnings = extra_warnings or []
-
-    # Compute entry CSS classes
-    # Both hard errors and serialization issues get red background
-    all_warnings = extra_warnings + list(output.warnings)
+    all_warnings = (extra_warnings or []) + list(output.warnings)
     has_error = output.error is not None or not output.is_serializable
-
-    has_expandable_content = output.expanded_html is not None
-    # Detect wrap button needs from output css_class
+    has_expandable_content = output.expanded_markup is not None
     has_categories = output.css_class == CSS_DTYPE_CATEGORY and bool(
-        output.preview_html
+        output.preview_markup
     )
     has_columns_list = output.css_class == CSS_DTYPE_DATAFRAME and bool(
-        output.preview_html
+        output.preview_markup
     )
 
-    # Build row using consolidated helper
-    parts = [
-        render_entry_row_open(
-            entry.key,
-            output.type_name,
-            has_warnings=bool(all_warnings),
-            is_error=has_error,
-            has_expandable_content=has_expandable_content,
-        )
-    ]
-
-    # Name cell
-    parts.append(render_name_cell(entry.key))
-
-    # Type cell
-    type_cell_config = TypeCellConfig(
-        type_name=output.type_name,
-        css_class=output.css_class,
-        type_html=output.type_html if append_type_html else None,
-        tooltip=output.tooltip,
-        warnings=all_warnings,
-        is_not_serializable=not output.is_serializable,
-        has_columns_list=has_columns_list,
-        has_categories_list=has_categories,
-        append_type_html=append_type_html,
-    )
-    parts.append(render_entry_type_cell(type_cell_config))
-
-    # Preview cell
-    # Error takes precedence over preview/preview_html
-    preview_html = output.preview_html
+    preview_markup = output.preview_markup
     preview_text = output.preview
-
-    if output.error and not preview_html:
-        # Generate error preview if error is set but no preview_html provided
-        error_text = escape_html(output.error)
-        preview_html = f'<span class="{CSS_TEXT_ERROR}">{error_text}</span>'
+    if output.error and not preview_markup:
+        preview_markup = Markup(get_macros().error_preview(output.error))
 
     if preview_note and preview_text:
         preview_text = f"{preview_note} {preview_text}"
     elif preview_note:
         preview_text = preview_note
 
-    parts.append(
-        render_entry_preview_cell(
-            preview_html=preview_html,
+    rendered = (
+        get_env()
+        .get_template("entry.j2")
+        .render(
+            entry_key=entry.key,
+            type_name=output.type_name,
+            css_class=output.css_class,
+            type_markup=output.type_markup,
+            tooltip=output.tooltip,
+            all_warnings=all_warnings,
+            is_not_serializable=not output.is_serializable,
+            has_error=has_error,
+            has_expandable_content=has_expandable_content,
+            has_columns_list=has_columns_list,
+            has_categories_list=has_categories,
+            append_type_markup=append_type_markup,
+            preview_markup=preview_markup,
             preview_text=preview_text,
+            expanded_markup=output.expanded_markup,
         )
     )
-
-    # Expandable entries use <details>/<summary>; render_nested_content
-    # closes the <summary> and adds the nested content div.
-    if has_expandable_content:
-        parts.append(render_nested_content(output.expanded_html))
-        parts.append("</details>")
-    else:
-        parts.append("</div>")
-
-    return "\n".join(parts)
+    return Markup(rendered)

@@ -1,0 +1,16 @@
+{# Outer AnnData repr frame.
+   Pre-rendered fragments (header, sections, footer, css, js) arrive as
+   Markup and pass through verbatim. Scalars (container_id, depth, style)
+   are plain str and autoescaped by the engine.
+#}
+{% if css %}{{ css }}{% endif %}
+<div class="anndata-repr" id="{{ container_id }}" data-depth="{{ depth }}" style="{{ style }}">
+  {% if header %}{{ header }}{% endif %}
+  {% if index_preview %}{{ index_preview }}{% endif %}
+  <div class="anndata-repr__sections">
+    {% for section in sections %}{{ section }}{% endfor %}
+  </div>
+  {% if footer %}{{ footer }}{% endif %}
+  {% if hints %}{{ hints }}{% endif %}
+</div>
+{% if javascript %}{{ javascript }}{% endif %}

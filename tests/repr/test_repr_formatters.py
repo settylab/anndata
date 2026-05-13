@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import scipy.sparse as sp
+from markupsafe import Markup
 
 from anndata import AnnData
 
@@ -290,9 +291,9 @@ class TestPandasFormatters:
         assert "3 × 2" in result.type_name
 
         result_obsm = formatter.format(df, FormatterContext(section="obsm"))
-        assert result_obsm.preview_html is not None
-        assert "a" in result_obsm.preview_html
-        assert "b" in result_obsm.preview_html
+        assert result_obsm.preview_markup is not None
+        assert "a" in result_obsm.preview_markup
+        assert "b" in result_obsm.preview_markup
 
     def test_dataframe_formatter_expandable(self):
         """Test DataFrameFormatter with expandable to_html enabled."""
@@ -305,14 +306,14 @@ class TestPandasFormatters:
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
 
         result = formatter.format(df, ctx)
-        assert result.expanded_html is None
+        assert result.expanded_markup is None
 
         original = anndata.settings.repr_html_dataframe_expand
         try:
             anndata.settings.repr_html_dataframe_expand = True
             result_expanded = formatter.format(df, ctx)
-            assert result_expanded.expanded_html is not None
-            assert "<table" in result_expanded.expanded_html
+            assert result_expanded.expanded_markup is not None
+            assert "<table" in result_expanded.expanded_markup
         finally:
             anndata.settings.repr_html_dataframe_expand = original
 
@@ -328,9 +329,9 @@ class TestPandasFormatters:
         df = pd.DataFrame(long_names)
 
         result = formatter.format(df, FormatterContext(section="obsm"))
-        assert result.preview_html is not None
-        assert "anndata-columns" in result.preview_html
-        assert "very_long_column_name_0" in result.preview_html
+        assert result.preview_markup is not None
+        assert "anndata-columns" in result.preview_markup
+        assert "very_long_column_name_0" in result.preview_markup
 
 
 class TestBuiltinFormatters:
@@ -656,10 +657,10 @@ class TestAnnDataFormatter:
         inner = AnnData(np.zeros((5, 3)))
 
         result_shallow = formatter.format(inner, FormatterContext(depth=0, max_depth=3))
-        assert result_shallow.expanded_html is not None
+        assert result_shallow.expanded_markup is not None
 
         result_deep = formatter.format(inner, FormatterContext(depth=2, max_depth=3))
-        assert result_deep.expanded_html is None
+        assert result_deep.expanded_markup is None
 
 
 class TestFutureCompatibility:
@@ -779,7 +780,9 @@ class TestCustomHtmlContent:
                 return FormattedOutput(
                     type_name="CustomInline",
                     css_class="anndata-dtype--custom",
-                    preview_html='<span class="test-inline">Inline Preview</span>',
+                    preview_markup=Markup(
+                        '<span class="test-inline">Inline Preview</span>'
+                    ),
                 )
 
         formatter = InlineHtmlFormatter()
@@ -820,7 +823,7 @@ class TestCustomHtmlContent:
                 )
 
             def format(self, obj, context):
-                tree_html = """
+                tree_html = Markup("""
                 <div class="test-tree">
                     <ul>
                         <li>Root
@@ -831,11 +834,11 @@ class TestCustomHtmlContent:
                         </li>
                     </ul>
                 </div>
-                """
+                """)
                 return FormattedOutput(
                     type_name="TreeData (3 nodes)",
                     css_class="anndata-dtype--tree",
-                    expanded_html=tree_html,
+                    expanded_markup=tree_html,
                 )
 
         formatter = ExpandableHtmlFormatter()
@@ -1009,29 +1012,29 @@ class TestObsmVarmPreviewConsistency:
         result = formatter.format(arr, FormatterContext(section="varm"))
         assert result.preview == "(15 columns)"
 
-    def test_dataframe_obsm_preview_html(self):
-        """Test DataFrameFormatter shows column list in obsm preview_html."""
+    def test_dataframe_obsm_preview_markup(self):
+        """Test DataFrameFormatter shows column list in obsm preview_markup."""
         from anndata._repr.formatters import DataFrameFormatter
         from anndata._repr.registry import FormatterContext
 
         formatter = DataFrameFormatter()
         df = pd.DataFrame({"col_a": [1, 2, 3], "col_b": [4, 5, 6], "col_c": [7, 8, 9]})
 
-        # No preview_html outside obsm/varm
+        # No preview_markup outside obsm/varm
         result = formatter.format(df, FormatterContext(section="uns"))
-        assert result.preview_html is None
+        assert result.preview_markup is None
 
         # Shows column names in obsm
         result = formatter.format(df, FormatterContext(section="obsm"))
-        assert result.preview_html is not None
-        assert "col_a" in result.preview_html
-        assert "col_b" in result.preview_html
-        assert "col_c" in result.preview_html
+        assert result.preview_markup is not None
+        assert "col_a" in result.preview_markup
+        assert "col_b" in result.preview_markup
+        assert "col_c" in result.preview_markup
 
         # Shows column names in varm
         result = formatter.format(df, FormatterContext(section="varm"))
-        assert result.preview_html is not None
-        assert "col_a" in result.preview_html
+        assert result.preview_markup is not None
+        assert "col_a" in result.preview_markup
 
     def test_1d_arrays_no_preview(self):
         """Test that 1D arrays don't show column preview in obsm/varm."""

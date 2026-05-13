@@ -1,0 +1,22 @@
+{# Error-section block used when a whole section failed to render.
+
+   Inputs:
+   - section (str): section name (e.g. "X", "var"). Autoescaped.
+   - error (str): truncated error message (caller handles truncation).
+     Autoescaped.
+
+   Renders a <details class="anndata-section anndata-sec-error" open> frame
+   with a single red error entry. Not a normal section: no entries grid,
+   no doc_url, no tooltip.
+#}
+<details class="anndata-section anndata-sec-error" data-section="{{ section }}" open>
+  <summary>
+    <span class="anndata-section__name">{{ section }}</span>
+    <span class="anndata-section__count anndata-badge--error">(error)</span>
+  </summary>
+  <div class="anndata-section__content">
+    <div class="anndata-entry--error">
+      Failed to render: {{ error }}
+    </div>
+  </div>
+</details>

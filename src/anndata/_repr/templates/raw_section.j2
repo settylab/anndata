@@ -1,0 +1,16 @@
+{# Raw-section frame: a minimal single-row "section" for adata.raw.
+
+   Inputs:
+   - entry_markup (Markup): the pre-rendered Raw row (from row_open + name/type/
+     preview cells + optional nested_content + closing </details>|</div>).
+     Trusted HTML, emitted verbatim.
+
+   The outer container uses ``anndata-sec anndata-sec-raw`` (not the normal
+   ``anndata-section`` <details> frame) because Raw shows a single row rather
+   than an expandable group of entries.
+#}
+<div class="anndata-sec anndata-sec-raw" data-section="raw">
+  <div class="anndata-section__entries">
+    {{ entry_markup }}
+  </div>
+</div>

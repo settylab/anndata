@@ -1,0 +1,23 @@
+{# Renders one entry row.
+
+   Trust contract:
+   - `entry_key`, `type_name`, `css_class`, `tooltip`, `preview_text` and items in
+     `all_warnings` are plain str and autoescaped inside `{{ … }}`.
+   - `type_markup`, `preview_markup`, `expanded_markup` arrive as Markup (produced by
+     Python formatters) and pass through verbatim.
+#}
+{% from '_macros.j2' import name_cell, nested_content, preview_cell, row_open, type_cell %}
+
+{%- set entry_classes = 'anndata-entry' -%}
+{%- if all_warnings %}{%- set entry_classes = entry_classes ~ ' warning' -%}{%- endif -%}
+{%- if has_error %}{%- set entry_classes = entry_classes ~ ' error' -%}{%- endif -%}
+
+{{ row_open(entry_key, type_name, entry_classes, has_expandable_content) -}}
+{{ name_cell(entry_key) -}}
+{{ type_cell(type_name, css_class, type_markup=type_markup, tooltip=tooltip, all_warnings=all_warnings, is_not_serializable=is_not_serializable, has_columns_list=has_columns_list, has_categories_list=has_categories_list, append_type_markup=append_type_markup) -}}
+{{ preview_cell(preview_markup=preview_markup, preview_text=preview_text) -}}
+{%- if has_expandable_content -%}
+{{ nested_content(expanded_markup) }}</details>
+{%- else -%}
+</div>
+{%- endif -%}

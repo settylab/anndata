@@ -1,0 +1,213 @@
+{# Reusable small HTML components used by templates and as the single source of
+   truth for cell-level HTML (mirrored by thin Python wrappers in
+   _repr/components.py and _repr/core.py).
+
+   Trust contract (see environment.py):
+   - plain str args are autoescaped by Jinja inside `{{ … }}`
+   - Markup args pass through verbatim
+   - Globals CSS_TEXT_MUTED, NOT_SERIALIZABLE_MSG, STYLE_HIDDEN come from the
+     Environment.globals; do not hardcode their string values.
+#}
+
+{%- macro badge(text, variant='', tooltip='') -%}
+{%- if variant -%}
+<span class="anndata-badge {{ variant }}"{% if tooltip %} title="{{ tooltip }}"{% endif %}>{{ text }}</span>
+{%- else -%}
+<span class="anndata-badge"{% if tooltip %} title="{{ tooltip }}"{% endif %}>{{ text }}</span>
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro copy_button(text, tooltip='Copy') -%}
+<button class="anndata-entry__copy" style="{{ STYLE_HIDDEN }}" data-copy="{{ text }}" title="{{ tooltip }}" aria-label="{{ tooltip }}"></button>
+{%- endmacro -%}
+
+{%- macro muted_span(text) -%}
+<span class="{{ CSS_TEXT_MUTED }}">{{ text }}</span>
+{%- endmacro -%}
+
+{%- macro warning_icon(warnings, is_not_serializable=false) -%}
+{%- if warnings or is_not_serializable -%}
+{%- if is_not_serializable and warnings -%}
+{%- set title = NOT_SERIALIZABLE_MSG ~ ': ' ~ warnings | join('; ') -%}
+{%- elif is_not_serializable -%}
+{%- set title = NOT_SERIALIZABLE_MSG -%}
+{%- else -%}
+{%- set title = warnings | join('; ') -%}
+{%- endif -%}
+<span class="anndata-entry__warning" title="{{ title }}">(!)</span>
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro wrap_button(css_class) -%}
+<button class="{{ css_class }}" style="display:none" title="Expand to multi-line view">▼</button>
+{%- endmacro -%}
+
+{# File-path span: <span class="anndata-header__filepath">{path}</span> with
+   optional inline style. Used in the header next to backed/lazy badges. #}
+{%- macro filepath_span(path, style='') -%}
+{%- if style -%}
+<span class="anndata-header__filepath" style="{{ style }}">{{ path }}</span>
+{%- else -%}
+<span class="anndata-header__filepath">{{ path }}</span>
+{%- endif -%}
+{%- endmacro -%}
+
+{# Name cell: first column of an entry row. Shows the key with a copy button. #}
+{%- macro name_cell(entry_key) -%}
+<span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top"><span class="anndata-entry__name-inner"><span class="anndata-entry__name-text" title="{{ entry_key }}">{{ entry_key }}</span>{{ copy_button(entry_key, 'Copy name') }}</span></span>
+{%- endmacro -%}
+
+{# Type cell: second column of an entry row. Combines type label, warnings,
+   optional wrap buttons, and optional custom type_markup (either as replacement
+   or appended below the label when append_type_markup=True). #}
+{%- macro type_cell(type_name, css_class, type_markup=None, tooltip='', all_warnings=None, is_not_serializable=false, has_columns_list=false, has_categories_list=false, append_type_markup=false) -%}
+<span class="anndata-entry__type" style="display:inline-block;min-width:var(--anndata-type-col-width,180px);vertical-align:top">
+{%- if type_markup and not append_type_markup -%}
+{{ type_markup }}
+{%- elif tooltip -%}
+<span class="{{ css_class }}" title="{{ tooltip }}">{{ type_name }}</span>
+{%- else -%}
+<span class="{{ css_class }}">{{ type_name }}</span>
+{%- endif -%}
+{{ warning_icon(all_warnings or [], is_not_serializable) }}
+{%- if has_columns_list %}{{ wrap_button('anndata-columns__wrap') }}{% endif -%}
+{%- if has_categories_list %}{{ wrap_button('anndata-categories__wrap') }}{% endif -%}
+{%- if type_markup and append_type_markup -%}
+<span class="anndata-entry__custom">{{ type_markup }}</span>
+{%- endif -%}
+</span>
+{%- endmacro -%}
+
+{# Preview cell: third column of an entry row. Either trusted Markup or muted
+   plain text. #}
+{%- macro preview_cell(preview_markup=None, preview_text=None) -%}
+<span class="anndata-entry__preview" style="display:inline-block;vertical-align:top">
+{%- if preview_markup -%}
+{{ preview_markup }}
+{%- elif preview_text -%}
+{{ muted_span(preview_text) }}
+{%- endif -%}
+</span>
+{%- endmacro -%}
+
+{# Row open: renders the opening element(s) for an entry row. Caller builds
+   css_class (space-separated). When has_expandable_content is true, emits
+   <details><summary>; otherwise a plain <div>. #}
+{%- macro row_open(key, dtype, css_class, has_expandable_content=false) -%}
+{%- if has_expandable_content -%}
+<details class="{{ css_class }}" data-key="{{ key }}" data-dtype="{{ dtype }}"><summary class="anndata-entry__summary">
+{%- else -%}
+<div class="{{ css_class }}" data-key="{{ key }}" data-dtype="{{ dtype }}">
+{%- endif -%}
+{%- endmacro -%}
+
+{# Nested content: closes the <summary> of an expandable entry and wraps the
+   nested HTML body. Caller is responsible for the closing </details>. #}
+{%- macro nested_content(html_content) -%}
+</summary><div class="anndata-entry__nested-content" style="margin-left:1.5em"><div class="anndata-entry__expanded">{{ html_content }}</div></div>
+{%- endmacro -%}
+
+{# Truncation indicator: "... and N more" line shown below a truncated section. #}
+{%- macro truncation_indicator(remaining) -%}
+<div class="anndata-section__truncated">... and {{ remaining }} more</div>
+{%- endmacro -%}
+
+{# Category list: comma-separated category swatches with optional color dots
+   and a "...+N" truncation tail.
+
+   `items` is a sequence of (label, safe_color_or_none) pairs; the caller
+   (Python) is responsible for sanitizing colors via sanitize_css_color before
+   passing them in. `total_hidden` is the total number of hidden categories
+   (from both max_cats truncation and lazy n_hidden). #}
+{%- macro category_list(items, total_hidden=0) -%}
+<span class="anndata-categories">
+{%- for label, safe_color in items -%}
+{%- if not loop.first %}<span class="anndata-categories__sep">, </span>{% endif -%}
+<span class="anndata-categories__item">
+{%- if safe_color -%}
+<span class="anndata-categories__dot" style="background:{{ safe_color }};"></span>
+{%- endif -%}
+<span>{{ label }}</span>
+</span>
+{%- endfor -%}
+{%- if total_hidden > 0 -%}
+<span class="{{ CSS_TEXT_MUTED }}">...+{{ total_hidden }}</span>
+{%- endif -%}
+</span>
+{%- endmacro -%}
+
+{# Error preview span: muted-red error message used in the preview column. #}
+{%- macro error_preview(message) -%}
+<span class="{{ CSS_TEXT_ERROR }}">{{ message }}</span>
+{%- endmacro -%}
+
+{# Warning preview span: yellow warning message used in the preview column. #}
+{%- macro warning_preview(message) -%}
+<span class="{{ CSS_TEXT_WARNING }}">{{ message }}</span>
+{%- endmacro -%}
+
+{# Muted error span: an italicised, parenthesised error shown in a muted
+   colour (used for attribute-access / format errors in the X entry and
+   similar compact rows). #}
+{%- macro muted_error_span(error_msg) -%}
+<span class="{{ CSS_TEXT_MUTED }}"><em>({{ error_msg }})</em></span>
+{%- endmacro -%}
+
+{# DataFrame columns preview: "[col1, col2, ...]" list used in obsm/varm for
+   DataFrames. `columns` is a sequence of plain str values; Jinja autoescapes
+   each when rendered inside {{ … }}. #}
+{%- macro columns_preview(columns) -%}
+<span class="anndata-columns">[{{ columns|join(", ") }}]</span>
+{%- endmacro -%}
+
+{# Single color swatch. Caller has already run sanitize_css_color on the
+   supplied `color` and passes `valid=True` when the result was non-None.
+   For invalid colors we render a "?" placeholder with the original label
+   in the tooltip. #}
+{%- macro color_swatch(color, label, valid=true) -%}
+{%- if valid -%}
+<span class="{{ CSS_COLORS_SWATCH }}" style="background:{{ color }}" title="{{ label }}"></span>
+{%- else -%}
+<span class="{{ CSS_COLORS_SWATCH }} {{ CSS_COLORS_SWATCH_INVALID }}" title="Invalid color: '{{ label }}'">?</span>
+{%- endif -%}
+{%- endmacro -%}
+
+{# Color preview wrapper: aggregates already-rendered swatches (Markup) and an
+   optional overflow counter. `swatches` is an iterable of Markup fragments
+   produced by `color_swatch`; they pass through verbatim. #}
+{%- macro color_preview(swatches, overflow_count=0) -%}
+<span class="{{ CSS_COLORS }}">
+{%- for swatch in swatches -%}
+{{ swatch }}
+{%- endfor -%}
+{%- if overflow_count and overflow_count > 0 -%}
+<span class="{{ CSS_TEXT_MUTED }}">+{{ overflow_count }}</span>
+{%- endif -%}
+</span>
+{%- endmacro -%}
+
+{# Wrapper for a nested AnnData repr (the HTML fragment produced by
+   generate_repr_html for a nested object). `inner` is Markup and passes
+   through verbatim. #}
+{%- macro nested_anndata_wrapper(inner) -%}
+<div class="{{ CSS_NESTED_ANNDATA }}">{{ inner }}</div>
+{%- endmacro -%}
+
+{# README info icon span. `content` and `tooltip` are plain str and must be
+   pre-scrubbed of NULs by the caller (Python replaces "\x00" -> "\ufffd"
+   before passing in). Jinja autoescapes the rest. #}
+{%- macro readme_icon(content, tooltip) -%}
+<span class="anndata-readme__icon" data-readme="{{ content }}" title="{{ tooltip }}" role="button" tabindex="0" aria-label="View README">ⓘ</span>
+{%- endmacro -%}
+
+{# Plain <pre> block for fallback rendering when the HTML repr is disabled. #}
+{%- macro pre_fallback(text) -%}
+<pre>{{ text }}</pre>
+{%- endmacro -%}
+
+{# Search box: input + case/regex toggle buttons + filter indicator. The
+   whole box is hidden until JS enables it (STYLE_HIDDEN). `search_id` is a
+   plain str and is autoescaped. #}
+{%- macro search_box(search_id) -%}
+<span class="anndata-search__box" style="{{ STYLE_HIDDEN }}"><input type="text" id="{{ search_id }}" name="{{ search_id }}" class="anndata-search__input" placeholder="Search..." aria-label="Search fields"><span class="anndata-search__toggles"><button type="button" class="anndata-search__toggle anndata-search__toggle--case" title="Match case" aria-label="Match case" aria-pressed="false">Aa</button><button type="button" class="anndata-search__toggle anndata-search__toggle--regex" title="Use regular expression" aria-label="Use regular expression" aria-pressed="false">.*</button></span></span><span class="anndata-search__indicator"></span>
+{%- endmacro -%}

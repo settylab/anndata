@@ -34,6 +34,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from markupsafe import Markup
 
 import anndata as ad
 
@@ -49,7 +50,6 @@ from anndata import AnnData  # noqa: E402
 from anndata._repr import (  # noqa: E402
     FormattedOutput,
     TypeFormatter,
-    escape_html,
     extract_uns_type_hint,
     register_formatter,
 )
@@ -219,7 +219,7 @@ try:
                     type_name=f"DiGraph ({n_nodes} nodes, {n_leaves} leaves)",
                     css_class="anndata-dtype--tree",
                     tooltip=f"Phylogenetic tree with {n_nodes} total nodes",
-                    expanded_html=svg_html,
+                    expanded_markup=Markup(svg_html),
                 )
                 entries.append(FormattedEntry(key=key, output=output))
             return entries
@@ -258,7 +258,7 @@ try:
                     type_name=f"DiGraph ({n_nodes} nodes, {n_leaves} leaves)",
                     css_class="anndata-dtype--tree",
                     tooltip=f"Phylogenetic tree with {n_nodes} total nodes",
-                    expanded_html=svg_html,
+                    expanded_markup=Markup(svg_html),
                 )
                 entries.append(FormattedEntry(key=key, output=output))
             return entries
@@ -276,7 +276,7 @@ try:
 
         Renders like the X entry — a single non-foldable line showing
         key=value pairs for label, alignment, and allow_overlap.
-        All values are escaped via ``escape_html(repr(val))``.
+        All values are escaped via ``Markup(...).format(...)``.
         """
 
         @property
@@ -319,11 +319,9 @@ try:
                     entries.append(FormattedEntry(key=label, output=output))
             return entries
 
-        def render_html(self, obj, context: FormatterContext) -> str:
+        def render_html(self, obj, context: FormatterContext) -> Markup:
             """Render as a compact line instead of a foldable section."""
-            from anndata._repr.utils import escape_html
-
-            pairs = []
+            pairs: list[Markup] = []
             for attr, label in [
                 ("_tree_label", "label"),
                 ("_alignment", "alignment"),
@@ -332,16 +330,17 @@ try:
                 val = getattr(obj, attr, None)
                 if val is not None:
                     pairs.append(
-                        f'<span style="color:var(--anndata-text-secondary,#6c757d);">{label}=</span>'
-                        f"{escape_html(repr(val))}"
+                        Markup(
+                            '<span style="color:var(--anndata-text-secondary,#6c757d);">{label}=</span>{val}'
+                        ).format(label=label, val=repr(val))
                     )
-            summary = " &nbsp; ".join(pairs)
-            return (
+            summary = Markup(" &nbsp; ").join(pairs)
+            return Markup(
                 '<div class="anndata-x__entry">'
-                f"<span>tree</span>"
-                f"<span>{summary}</span>"
+                "<span>tree</span>"
+                "<span>{summary}</span>"
                 "</div>"
-            )
+            ).format(summary=summary)
 
 except (ImportError, AttributeError):
     # AttributeError can occur on Python 3.14+ with incompatible networkx versions
@@ -433,7 +432,7 @@ try:
                     type_name=f"AnnData ({shape_str})",
                     css_class="anndata-dtype--anndata",
                     tooltip=f"Modality: {mod_name}",
-                    expanded_html=nested_html if can_expand else None,
+                    expanded_markup=Markup(nested_html) if can_expand else None,
                     is_serializable=True,
                 )
                 entries.append(FormattedEntry(key=mod_name, output=output))
@@ -469,7 +468,6 @@ try:
         FormatterRegistry,
         SectionFormatter,
         TypeFormatter,
-        escape_html,
         format_number,
         get_css,
         get_javascript,
@@ -575,9 +573,11 @@ try:
                     )
                 )
                 parts.append(
-                    f'<span class="anndata-file-path" style="font-family:ui-monospace,monospace;'
-                    f'font-size:11px;color:var(--anndata-text-secondary, #6c757d);">'
-                    f"{escape_html(self.path)}</span>"
+                    Markup(
+                        '<span class="anndata-file-path" style="font-family:ui-monospace,monospace;'
+                        'font-size:11px;color:var(--anndata-text-secondary, #6c757d);">'
+                        "{path}</span>"
+                    ).format(path=self.path)
                 )
 
             # Search box using render_search_box() helper
@@ -620,10 +620,12 @@ try:
             for cs_name in self.coordinate_systems:
                 tooltip = f"Elements: {elements_str}"
                 cs_parts.append(
-                    f'<span title="{escape_html(tooltip)}" style="'
-                    f"font-family:ui-monospace,monospace;font-size:11px;"
-                    f'color:var(--anndata-accent, #0d6efd);cursor:help;">'
-                    f"'{escape_html(cs_name)}'</span>"
+                    Markup(
+                        '<span title="{tooltip}" style="'
+                        "font-family:ui-monospace,monospace;font-size:11px;"
+                        'color:var(--anndata-accent, #0d6efd);cursor:help;">'
+                        "'{cs_name}'</span>"
+                    ).format(tooltip=tooltip, cs_name=cs_name)
                 )
 
             parts.append(", ".join(cs_parts))
@@ -640,7 +642,7 @@ try:
             for name, info in self.images.items():
                 # Build meta content (dimensions info) for the META column
                 dims_str = ", ".join(info.get("dims", ["y", "x"]))
-                meta = f'<span class="anndata-meta-info">[{dims_str}]</span>'
+                meta = Markup(f'<span class="anndata-meta-info">[{dims_str}]</span>')
 
                 # Create a FormattedEntry with FormattedOutput
                 entry = FormattedEntry(
@@ -648,16 +650,19 @@ try:
                     output=FormattedOutput(
                         type_name=f"DataArray {info['shape']} {info['dtype']}",
                         css_class="anndata-dtype--ndarray",
-                        preview_html=meta,  # Content in preview column (rightmost)
+                        preview_markup=meta,  # Content in preview column (rightmost)
                     ),
                 )
                 # render_formatted_entry() creates the table row HTML
                 rows.append(render_formatted_entry(entry))
 
-            # render_section() wraps rows in a collapsible section
+            # render_section() wraps rows in a collapsible section.
+            # Use Markup("\n").join so the joined result stays Markup — a
+            # plain str.join(...) would yield a bare str that Jinja autoescapes
+            # when render_section interpolates it.
             return render_section(
                 "images",
-                "\n".join(rows),
+                Markup("\n").join(rows),
                 n_items=len(self.images),
                 tooltip="Image data (xarray.DataArray)",
             )
@@ -667,21 +672,21 @@ try:
             rows = []
             for name, info in self.labels.items():
                 dims_str = ", ".join(info.get("dims", ["y", "x"]))
-                meta = f'<span class="anndata-meta-info">[{dims_str}]</span>'
+                meta = Markup(f'<span class="anndata-meta-info">[{dims_str}]</span>')
 
                 entry = FormattedEntry(
                     key=name,
                     output=FormattedOutput(
                         type_name=f"Labels {info['shape']} {info['dtype']}",
                         css_class="anndata-dtype--ndarray",
-                        preview_html=meta,
+                        preview_markup=meta,
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
 
             return render_section(
                 "labels",
-                "\n".join(rows),
+                Markup("\n").join(rows),
                 n_items=len(self.labels),
                 tooltip="Segmentation masks (xarray.DataArray)",
             )
@@ -690,21 +695,23 @@ try:
             """Build points section."""
             rows = []
             for name, info in self.points.items():
-                meta = f'<span class="anndata-meta-info">{info["n_dims"]}D coordinates</span>'
+                meta = Markup(
+                    f'<span class="anndata-meta-info">{info["n_dims"]}D coordinates</span>'
+                )
 
                 entry = FormattedEntry(
                     key=name,
                     output=FormattedOutput(
                         type_name=f"dask.DataFrame ({format_number(info['n_points'])} × {info['n_dims']})",
                         css_class="anndata-dtype--dataframe",
-                        preview_html=meta,
+                        preview_markup=meta,
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
 
             return render_section(
                 "points",
-                "\n".join(rows),
+                Markup("\n").join(rows),
                 n_items=len(self.points),
                 tooltip="Point annotations (dask.DataFrame)",
             )
@@ -713,21 +720,23 @@ try:
             """Build shapes section."""
             rows = []
             for name, info in self.shapes.items():
-                meta = f'<span class="anndata-meta-info">{info["geometry_type"]}</span>'
+                meta = Markup(
+                    f'<span class="anndata-meta-info">{info["geometry_type"]}</span>'
+                )
 
                 entry = FormattedEntry(
                     key=name,
                     output=FormattedOutput(
                         type_name=f"GeoDataFrame ({format_number(info['n_shapes'])} shapes)",
                         css_class="anndata-dtype--dataframe",
-                        preview_html=meta,
+                        preview_markup=meta,
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
 
             return render_section(
                 "shapes",
-                "\n".join(rows),
+                Markup("\n").join(rows),
                 n_items=len(self.shapes),
                 tooltip="Vector shapes (geopandas.GeoDataFrame)",
             )
@@ -750,20 +759,21 @@ try:
                     show_search=False,
                 )
 
-                # FormattedOutput with expanded_html makes it collapsible
+                # FormattedOutput with expanded_markup makes it collapsible
                 entry = FormattedEntry(
                     key=name,
                     output=FormattedOutput(
                         type_name=f"AnnData ({adata.n_obs} × {adata.n_vars})",
                         css_class="anndata-dtype--anndata",
-                        expanded_html=nested_html,  # Makes the nested content collapsible
+                        # Makes the nested content collapsible
+                        expanded_markup=Markup(nested_html),
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
 
             return render_section(
                 "tables",
-                "\n".join(rows),
+                Markup("\n").join(rows),
                 n_items=len(self.tables),
                 tooltip="Annotation tables (AnnData)",
             )
@@ -794,7 +804,7 @@ try:
                 rows = [render_formatted_entry(entry) for entry in entries]
                 section_html = render_section(
                     formatter.section_name,
-                    "\n".join(rows),
+                    Markup("\n").join(rows),
                     n_items=len(entries),
                     tooltip=getattr(formatter, "tooltip", ""),
                 )
@@ -1940,7 +1950,8 @@ def main():  # noqa: PLR0915, PLR0912
 
             return FormattedOutput(
                 type_name="analysis history",
-                preview_html="".join(html_parts),  # Use preview_html for inline preview
+                # preview_markup takes Markup — join the pre-escaped fragments
+                preview_markup=Markup("".join(html_parts)),
             )
 
     adata_uns = AnnData(np.zeros((10, 5)))
@@ -2330,7 +2341,7 @@ For more details, see the full documentation.
             "<ul>"
             "<li><code>get_css()</code> / <code>get_javascript()</code> - reuse styling and interactivity</li>"
             "<li><code>render_section()</code> - create collapsible sections (images, labels, points, shapes, tables)</li>"
-            "<li><code>render_formatted_entry()</code> with <code>preview_html</code> - table rows with preview column</li>"
+            "<li><code>render_formatted_entry()</code> with <code>preview_markup</code> - table rows with preview column</li>"
             "<li><code>generate_repr_html()</code> - embed nested AnnData (see 'tables' section)</li>"
             "<li><code>FormatterRegistry</code> - custom 'transforms' section added via SectionFormatter</li>"
             "</ul>"
@@ -3217,7 +3228,7 @@ Size bomb below (50KB):
 
             This produces a FormattedOutput with:
             - type_name: "category[registry] (n)" instead of just "category (n)"
-            - preview_html: Category values with validation indicators
+            - preview_markup: Category values with validation indicators
             - tooltip: Shows ontology ID and validation status
             - warnings: If unmapped values exist
             """
@@ -3236,24 +3247,27 @@ Size bomb below (50KB):
 
             # Build preview with validation status
             categories = list(obj.cat.categories[:5])
+            cat_spans = [
+                Markup(
+                    '<span style="color: var(--anndata-category-color, #666);">{}</span>'
+                ).format(str(c))
+                for c in categories
+            ]
+            cat_html = Markup(", ").join(cat_spans)
+            if n_cats > 5:
+                cat_html += Markup(' <span style="color: #888;">...+{}</span>').format(
+                    n_cats - 5
+                )
             if validated:
                 # All values mapped - show green checkmark
-                cat_html = ", ".join(
-                    f'<span style="color: var(--anndata-category-color, #666);">{escape_html(str(c))}</span>'
-                    for c in categories
+                cat_html += Markup(
+                    ' <span style="color: #28a745;" title="All values validated">✓</span>'
                 )
-                if n_cats > 5:
-                    cat_html += f' <span style="color: #888;">...+{n_cats - 5}</span>'
-                cat_html += ' <span style="color: #28a745;" title="All values validated">✓</span>'
             else:
                 # Some unmapped values - show warning
-                cat_html = ", ".join(
-                    f'<span style="color: var(--anndata-category-color, #666);">{escape_html(str(c))}</span>'
-                    for c in categories
-                )
-                if n_cats > 5:
-                    cat_html += f' <span style="color: #888;">...+{n_cats - 5}</span>'
-                cat_html += f' <span style="color: #fd7e14;" title="{unmapped_count} unmapped values">⚠ {unmapped_count} unmapped</span>'
+                cat_html += Markup(
+                    ' <span style="color: #fd7e14;" title="{n} unmapped values">⚠ {n} unmapped</span>'
+                ).format(n=unmapped_count)
 
             # Build tooltip with full metadata
             tooltip_parts = [f"Registry: {registry}"]
@@ -3267,7 +3281,7 @@ Size bomb below (50KB):
                 type_name=type_name,
                 css_class="anndata-dtype--category",
                 tooltip="\n".join(tooltip_parts),
-                preview_html=cat_html,
+                preview_markup=Markup(cat_html),
                 warnings=[]
                 if validated
                 else [f"{unmapped_count} values not mapped to ontology"],
