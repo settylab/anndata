@@ -14,6 +14,10 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from markupsafe import Markup
+
+from .environment import get_env
+
 from .._repr_constants import (
     CSS_BADGE_BACKED,
     CSS_BADGE_EXTENSION,
@@ -272,13 +276,6 @@ def generate_repr_html(  # noqa: PLR0913
     # Generate unique container ID
     container_id = _container_id or f"anndata-repr-{uuid.uuid4().hex[:8]}"
 
-    # Build HTML parts
-    parts = []
-
-    # CSS and JS only at top level
-    if depth == 0:
-        parts.append(get_css())
-
     # Calculate field name column width based on content
     max_field_width = get_setting(
         "repr_html_max_field_width", default=DEFAULT_MAX_FIELD_WIDTH
@@ -288,61 +285,66 @@ def generate_repr_html(  # noqa: PLR0913
     # Get type column width from settings
     type_width = get_setting("repr_html_type_width", default=DEFAULT_TYPE_WIDTH)
 
-    # Container with computed column widths as CSS variables.
-    # Inline font-family:monospace provides readable fallback when CSS is stripped
-    # (GitHub, untrusted notebooks). CSS overrides with its own font stack.
-    # Inline min-width on cells + CSS custom properties give column alignment
-    # even without a stylesheet.
-    style = f"font-family: monospace; --anndata-name-col-width: {field_width}px; --anndata-type-col-width: {type_width}px;"
-    parts.append(
-        f'<div class="anndata-repr" id="{container_id}" data-depth="{depth}" style="{style}">'
+    # Computed column widths as CSS variables. Inline font-family:monospace
+    # provides a readable fallback when CSS is stripped (GitHub, untrusted
+    # notebooks).
+    style = (
+        f"font-family: monospace; "
+        f"--anndata-name-col-width: {field_width}px; "
+        f"--anndata-type-col-width: {type_width}px;"
     )
 
-    # Header (with search box integrated on the right)
+    # Gather already-rendered HTML fragments and mark them as trusted Markup.
+    # Each of these is produced by existing formatter/renderer code; wrapping
+    # at this boundary is the trust assertion the POC illustrates.
+    header_html: Markup | None = None
     if show_header:
-        parts.append(
+        header_html = Markup(
             _render_header(
-                adata, show_search=show_search and depth == 0, container_id=container_id
+                adata,
+                show_search=show_search and depth == 0,
+                container_id=container_id,
             )
         )
 
-    # Index preview (only at top level)
+    index_preview_html: Markup | None = None
+    footer_html: Markup | None = None
+    hints_html: Markup | None = None
+    css_html: Markup | None = None
+    javascript_html: Markup | None = None
     if depth == 0:
-        parts.append(_render_index_preview(adata))
-
-    # Sections container
-    parts.append('<div class="anndata-repr__sections">')
-    parts.extend(_render_all_sections(adata, context))
-    parts.append("</div>")  # anndata-repr__sections
-
-    # Footer with metadata (only at top level)
-    if depth == 0:
-        parts.append(_render_footer(adata))
-        # Degradation hints: visible only when CSS or JS is missing.
-        # No-CSS hint: visible by default, hidden by CSS.
-        parts.append(
+        index_preview_html = Markup(_render_index_preview(adata))
+        footer_html = Markup(_render_footer(adata))
+        hints_html = Markup(
             '<div class="anndata-repr__hint-nocss">'
             "<em>Styled representation available in Jupyter and trusted notebooks "
             "(colors, search, type highlighting).</em>"
             "</div>"
-        )
-        # No-JS hint: hidden by default (no-CSS case already has its own hint),
-        # shown by CSS (for static HTML with styles but no JS),
-        # hidden again by JS on init.
-        parts.append(
             '<div class="anndata-repr__hint-nojs" style="display:none">'
             "<em>Interactive features (search, copy, category wrapping) "
             "require JavaScript. Trust this notebook to enable them.</em>"
             "</div>"
         )
+        css_html = Markup(get_css())
+        javascript_html = Markup(get_javascript(container_id))
 
-    parts.append("</div>")  # anndata-repr
+    sections_markup = [Markup(s) for s in _render_all_sections(adata, context)]
 
-    # JavaScript (only at top level)
-    if depth == 0:
-        parts.append(get_javascript(container_id))
-
-    return "\n".join(parts)
+    # Render the outer template. `container_id`, `depth`, and `style` are
+    # plain strings and get autoescaped by the engine; the Markup-wrapped
+    # fragments pass through verbatim.
+    return get_env().get_template("anndata.j2").render(
+        container_id=container_id,
+        depth=depth,
+        style=style,
+        css=css_html,
+        header=header_html,
+        index_preview=index_preview_html,
+        sections=sections_markup,
+        footer=footer_html,
+        hints=hints_html,
+        javascript=javascript_html,
+    )
 
 
 def _render_all_sections(
