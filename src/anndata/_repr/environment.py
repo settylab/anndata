@@ -48,6 +48,9 @@ def get_env() -> Environment:
         trim_blocks=True,
         lstrip_blocks=True,
         finalize=_scrub_nulls,
+        # Templates ship inside the package and never change at runtime;
+        # skip the per-lookup mtime check of the default ``auto_reload=True``.
+        auto_reload=False,
     )
     env.globals.update(
         CSS_COLORS=CSS_COLORS,
