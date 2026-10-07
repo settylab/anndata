@@ -32,6 +32,8 @@ from functools import cached_property
 from types import BuiltinFunctionType, FunctionType, MethodType
 from typing import TYPE_CHECKING
 
+from markupsafe import Markup
+
 from .._repr_constants import (
     CSS_DTYPE_ANNDATA,
     CSS_DTYPE_UNKNOWN,
@@ -87,7 +89,7 @@ def _render_entry_row(
     *,
     append_type_html: bool = False,
     preview_note: str | None = None,
-) -> str:
+) -> Markup:
     """Render an entry row for DataFrame, mapping, or uns sections.
 
     Key validation is handled by FormatterRegistry.format_value() via context.key,
@@ -125,7 +127,7 @@ def _render_dataframe_section(
     section: str,
     df: pd.DataFrame,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render obs or var section."""
     n_cols = len(df.columns)
 
@@ -159,7 +161,7 @@ def _render_dataframe_section(
 
     return render_section(
         section,
-        "\n".join(rows),
+        Markup("\n").join(rows),
         n_items=n_cols,
         doc_url=doc_url,
         tooltip=tooltip,
@@ -177,10 +179,10 @@ def _render_mapping_section(
     section: str,
     mapping: Mapping[str | None, object],
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render obsm, varm, layers, obsp, varp sections."""
     if mapping is None:
-        return ""
+        return Markup()
 
     # `.X` is stored as `layers[None]`; it gets its own row, so hide it here
     hide_x = section == "layers" and None in mapping
@@ -212,7 +214,7 @@ def _render_mapping_section(
 
     return render_section(
         section,
-        "\n".join(rows),
+        Markup("\n").join(rows),
         n_items=n_items,
         doc_url=doc_url,
         tooltip=tooltip,
@@ -228,7 +230,7 @@ def _render_mapping_section(
 def _render_uns_section(
     uns: Mapping[str, object],
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render the uns section with special handling."""
     # Get count without creating full list (O(1) for dict)
     n_items = len(uns)
@@ -251,7 +253,7 @@ def _render_uns_section(
 
     return render_section(
         "uns",
-        "\n".join(rows),
+        Markup("\n").join(rows),
         n_items=n_items,
         doc_url=doc_url,
         tooltip=tooltip,
@@ -263,7 +265,7 @@ def _render_uns_entry(
     key: str,
     value: object,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render a single uns entry with special type handling.
 
     Rendering priority:
@@ -372,24 +374,28 @@ _NON_DATA_TYPES = (
 )
 
 
-def _render_unknown_sections(unknown_sections: list[tuple[str, str]]) -> str:
+def _render_unknown_sections(unknown_sections: list[tuple[str, str]]) -> Markup:
     """Render a section showing unknown/unrecognized attributes."""
     rows = []
     for attr_name, type_desc in unknown_sections:
         rows.append(render_entry_row_open(attr_name, type_desc))
         rows.append(render_name_cell(attr_name))
         rows.append(
-            f'<span class="anndata-entry__type">'
-            f'<span class="{CSS_DTYPE_UNKNOWN}" title="Unrecognized attribute">'
-            f"{escape_html(type_desc)}</span></span>"
-            '<span class="anndata-entry__preview"></span>'
-            "</div>"
+            Markup(
+                '<span class="anndata-entry__type">'
+                '<span class="{}" title="Unrecognized attribute">'
+                "{}</span></span>"
+                '<span class="anndata-entry__preview"></span>'
+                "</div>"
+            ).format(CSS_DTYPE_UNKNOWN, escape_html(type_desc))
         )
     return render_details_section(
         "unknown",
         "other",
         f"({len(unknown_sections)})",
-        f'<div class="anndata-section__entries">{"".join(rows)}</div>',
+        Markup('<div class="anndata-section__entries">{}</div>').format(
+            Markup("").join(rows)
+        ),
         is_open=False,
         extra_classes="anndata-sec-unknown",
     )
@@ -452,7 +458,7 @@ def _get_raw_meta_parts(raw: object) -> list[str]:
 def _render_raw_section(
     raw: object,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render the raw section as a single expandable row.
 
     The raw section shows unprocessed data that was saved before filtering/normalization.
@@ -467,7 +473,7 @@ def _render_raw_section(
     The depth parameter prevents infinite recursion.
     """
     if raw is None:
-        return ""
+        return Markup()
 
     # Safely get dimensions with fallbacks
     n_obs = _safe_get_attr(raw, "n_obs", "?")
@@ -481,8 +487,10 @@ def _render_raw_section(
     meta_text = ", ".join(meta_parts) if meta_parts else ""
 
     # Single row container (like a minimal section with just one entry)
-    parts = ['<div class="anndata-sec anndata-sec-raw" data-section="raw">']
-    parts.append('<div class="anndata-section__entries">')
+    parts = [
+        Markup('<div class="anndata-sec anndata-sec-raw" data-section="raw">'),
+        Markup('<div class="anndata-section__entries">'),
+    ]
 
     # Single row with raw info
     type_str = f"{format_number(n_obs)} obs × {format_number(n_vars)} vars"
@@ -499,22 +507,24 @@ def _render_raw_section(
     if can_expand:
         nested_html = _generate_raw_repr_html(raw, context.child("raw"))
         # Wrap in anndata-entry__nested-anndata for specific styling
-        wrapped_html = f'<div class="anndata-entry__nested-anndata">{nested_html}</div>'
+        wrapped_html = Markup(
+            '<div class="anndata-entry__nested-anndata">{}</div>'
+        ).format(nested_html)
         parts.append(render_nested_content(wrapped_html))
-        parts.append("</details>")  # close expandable entry
+        parts.append(Markup("</details>"))  # close expandable entry
     else:
-        parts.append("</div>")  # close plain entry
+        parts.append(Markup("</div>"))  # close plain entry
 
-    parts.append("</div>")  # close entries grid
-    parts.append("</div>")  # close section
+    parts.append(Markup("</div>"))  # close entries grid
+    parts.append(Markup("</div>"))  # close section
 
-    return "\n".join(parts)
+    return Markup("\n").join(parts)
 
 
 def _generate_raw_repr_html(
     raw,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Generate HTML repr for a Raw object.
 
     This renders X, var, and varm sections similar to AnnData,
@@ -535,14 +545,16 @@ def _generate_raw_repr_html(
 
     # Container with header showing Raw shape
     container_id = f"anndata-raw-{uuid.uuid4().hex[:8]}"
-    parts.append(f'<div class="anndata-repr" id="{container_id}">')
+    parts.append(Markup('<div class="anndata-repr" id="{}">').format(container_id))
 
     # Header for Raw - same structure as AnnData header
-    parts.append('<div class="anndata-header">')
-    parts.append('<span class="anndata-header__type">Raw</span>')
+    parts.append(Markup('<div class="anndata-header">'))
+    parts.append(Markup('<span class="anndata-header__type">Raw</span>'))
     shape_str = f"{format_number(n_obs)} obs × {format_number(n_vars)} vars"
-    parts.append(f'<span class="anndata-header__shape">{shape_str}</span>')
-    parts.append("</div>")
+    parts.append(
+        Markup('<span class="anndata-header__shape">{}</span>').format(shape_str)
+    )
+    parts.append(Markup("</div>"))
 
     parts.append(render_index_preview(raw))
 
@@ -570,6 +582,6 @@ def _generate_raw_repr_html(
     except Exception as e:  # noqa: BLE001
         parts.append(render_error_section("varm", str(e)))
 
-    parts.append("</div>")
+    parts.append(Markup("</div>"))
 
-    return "\n".join(parts)
+    return Markup("\n").join(parts)

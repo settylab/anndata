@@ -14,6 +14,8 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from markupsafe import Markup
+
 from .._core.anndata import AnnData
 from .._repr_constants import (
     CSS_BADGE_EXTENSION,
@@ -58,6 +60,7 @@ from .utils import (
     get_backing_info,
     is_backed,
     is_view,
+    trusted_html,
 )
 
 if TYPE_CHECKING:
@@ -182,7 +185,7 @@ def generate_repr_html(  # noqa: PLR0913
     show_header: bool = True,
     show_search: bool = True,
     _container_id: str | None = None,
-) -> str:
+) -> Markup:
     """
     Generate HTML representation for an AnnData object.
 
@@ -214,7 +217,7 @@ def generate_repr_html(  # noqa: PLR0913
     """
     # Check if HTML repr is enabled
     if not settings.repr_html_enabled:
-        return f"<pre>{escape_html(repr(adata))}</pre>"
+        return Markup("<pre>{}</pre>").format(escape_html(repr(adata)))
 
     # Create formatter context (resolves settings)
     context = _create_formatter_context(
@@ -234,7 +237,7 @@ def generate_repr_html(  # noqa: PLR0913
     container_id = _container_id or f"anndata-repr-{uuid.uuid4().hex[:8]}"
 
     # Build HTML parts
-    parts = []
+    parts: list[Markup] = []
 
     # CSS and JS only at top level
     if depth == 0:
@@ -251,7 +254,9 @@ def generate_repr_html(  # noqa: PLR0913
     # even without a stylesheet.
     style = f"font-family: monospace; --anndata-name-col-width: {field_width}px; --anndata-type-col-width: {type_width}px;"
     parts.append(
-        f'<div class="anndata-repr" id="{container_id}" data-depth="{depth}" style="{style}">'
+        Markup('<div class="anndata-repr" id="{}" data-depth="{}" style="{}">').format(
+            container_id, depth, style
+        )
     )
 
     # Header (with search box integrated on the right)
@@ -267,9 +272,9 @@ def generate_repr_html(  # noqa: PLR0913
         parts.append(render_index_preview(adata))
 
     # Sections container
-    parts.append('<div class="anndata-repr__sections">')
+    parts.append(Markup('<div class="anndata-repr__sections">'))
     parts.extend(_render_all_sections(adata, context))
-    parts.append("</div>")  # anndata-repr__sections
+    parts.append(Markup("</div>"))  # anndata-repr__sections
 
     # Footer with metadata (only at top level)
     if depth == 0:
@@ -277,36 +282,40 @@ def generate_repr_html(  # noqa: PLR0913
         # Degradation hints: visible only when CSS or JS is missing.
         # No-CSS hint: visible by default, hidden by CSS.
         parts.append(
-            '<div class="anndata-repr__hint-nocss">'
-            "<em>Styled representation available in Jupyter and trusted notebooks "
-            "(colors, search, type highlighting).</em>"
-            "</div>"
+            Markup(
+                '<div class="anndata-repr__hint-nocss">'
+                "<em>Styled representation available in Jupyter and trusted notebooks "
+                "(colors, search, type highlighting).</em>"
+                "</div>"
+            )
         )
         # No-JS hint: hidden by default (no-CSS case already has its own hint),
         # shown by CSS (for static HTML with styles but no JS),
         # hidden again by JS on init.
         parts.append(
-            '<div class="anndata-repr__hint-nojs" style="display:none">'
-            "<em>Interactive features (search, copy, category wrapping) "
-            "require JavaScript. Trust this notebook to enable them.</em>"
-            "</div>"
+            Markup(
+                '<div class="anndata-repr__hint-nojs" style="display:none">'
+                "<em>Interactive features (search, copy, category wrapping) "
+                "require JavaScript. Trust this notebook to enable them.</em>"
+                "</div>"
+            )
         )
 
-    parts.append("</div>")  # anndata-repr
+    parts.append(Markup("</div>"))  # anndata-repr
 
     # JavaScript (only at top level)
     if depth == 0:
         parts.append(get_javascript(container_id))
 
-    return "\n".join(parts)
+    return Markup("\n").join(parts)
 
 
 def _render_all_sections(
     adata: AnnData,
     context: FormatterContext,
-) -> list[str]:
+) -> list[Markup]:
     """Render all standard and custom sections."""
-    parts: list[str] = []
+    parts: list[Markup] = []
     custom_sections_after = _get_custom_sections_by_position(adata)
 
     for section in _SECTION_ORDER:
@@ -338,7 +347,7 @@ def _render_section(
     adata: AnnData,
     section: str,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render a single standard section.
 
     Attribute access happens inside the try/except so a broken section (one
@@ -406,7 +415,7 @@ def _render_custom_section(
     adata: AnnData,
     formatter: SectionFormatter,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render a custom section using its registered formatter.
 
     If the formatter defines ``render_html(obj, context)``, it is tried
@@ -417,7 +426,8 @@ def _render_custom_section(
     # Allow formatters to produce raw HTML (e.g., compact inline rows)
     if hasattr(formatter, "render_html"):
         try:
-            return formatter.render_html(adata, context)
+            # Trust boundary: a section formatter's render_html returns HTML
+            return trusted_html(formatter.render_html(adata, context))
         except Exception as e:  # noqa: BLE001
             from .._warnings import warn
 
@@ -442,7 +452,7 @@ def _render_custom_section(
         return render_error_section(formatter.section_name, f"{type(e).__name__}: {e}")
 
     if not entries:
-        return ""
+        return Markup()
 
     n_items = len(entries)
     section_name = formatter.section_name
@@ -458,7 +468,7 @@ def _render_custom_section(
     # Use render_section for consistent structure
     return render_section(
         getattr(formatter, "display_name", section_name),
-        "\n".join(rows),
+        Markup("\n").join(rows),
         n_items=n_items,
         doc_url=getattr(formatter, "doc_url", None),
         tooltip=getattr(formatter, "tooltip", ""),
@@ -469,17 +479,23 @@ def _render_custom_section(
 
 def _render_header(
     adata: AnnData, *, show_search: bool = False, container_id: str = ""
-) -> str:
+) -> Markup:
     """Render the header with type, shape, badges, and optional search box."""
-    parts = ['<div class="anndata-header">']
+    parts = [Markup('<div class="anndata-header">')]
 
     # Type name - allow for extension types
     type_name = type(adata).__name__
-    parts.append(f'<span class="anndata-header__type">{escape_html(type_name)}</span>')
+    parts.append(
+        Markup('<span class="anndata-header__type">{}</span>').format(
+            escape_html(type_name)
+        )
+    )
 
     # Shape
     shape_str = f"{format_number(adata.n_obs)} obs × {format_number(adata.n_vars)} vars"
-    parts.append(f'<span class="anndata-header__shape">{shape_str}</span>')
+    parts.append(
+        Markup('<span class="anndata-header__shape">{}</span>').format(shape_str)
+    )
 
     # View / backed / lazy badges and backing file path
     backed = is_backed(adata)
@@ -541,30 +557,32 @@ def _render_header(
         escaped_tooltip = escape_html(tooltip_text)
 
         parts.append(
-            f'<span class="anndata-readme__icon" '
-            f'data-readme="{escaped_readme}" '
-            f'title="{escaped_tooltip}" '
-            f'role="button" tabindex="0" aria-label="View README">'
-            f"ⓘ"
-            f"</span>"
+            Markup(
+                '<span class="anndata-readme__icon" '
+                'data-readme="{}" '
+                'title="{}" '
+                'role="button" tabindex="0" aria-label="View README">'
+                "ⓘ"
+                "</span>"
+            ).format(escaped_readme, escaped_tooltip)
         )
 
     # Search box on the right (spacer pushes it right) - use render_search_box() helper
     if show_search:
-        parts.append('<span class="anndata-spacer"></span>')
+        parts.append(Markup('<span class="anndata-spacer"></span>'))
         parts.append(render_search_box(container_id))
 
-    parts.append("</div>")
-    return "\n".join(parts)
+    parts.append(Markup("</div>"))
+    return Markup("\n").join(parts)
 
 
-def _render_footer(adata: AnnData) -> str:
+def _render_footer(adata: AnnData) -> Markup:
     """Render the footer with version and memory info."""
-    parts = ['<div class="anndata-footer">']
+    parts = [Markup('<div class="anndata-footer">')]
 
     # Version
     version = get_anndata_version()
-    parts.append(f"<span>anndata v{version}</span>")
+    parts.append(Markup("<span>anndata v{}</span>").format(version))
 
     # Memory usage. Omitted for lazy AnnData, where everything stays on disk and
     # __sizeof__ would only count a few in-memory wrappers.
@@ -576,17 +594,19 @@ def _render_footer(adata: AnnData) -> str:
                 if is_backed(adata)
                 else "Estimated memory usage"
             )
-            parts.append(f'<span title="{title}">~{mem_str}</span>')
+            parts.append(Markup('<span title="{}">~{}</span>').format(title, mem_str))
         except Exception:  # noqa: BLE001
             # Broad catch: __sizeof__ recursively calls into user data which could raise anything
             pass
 
-    parts.append("</div>")
-    return "\n".join(parts)
+    parts.append(Markup("</div>"))
+    return Markup("\n").join(parts)
 
 
-def _render_max_depth_indicator(adata: AnnData) -> str:
+def _render_max_depth_indicator(adata: AnnData) -> Markup:
     """Render indicator when max depth is reached."""
     n_obs = getattr(adata, "n_obs", "?")
     n_vars = getattr(adata, "n_vars", "?")
-    return f'<div class="anndata-depth-limit">AnnData ({format_number(n_obs)} × {format_number(n_vars)}) - max depth reached</div>'
+    return Markup(
+        '<div class="anndata-depth-limit">AnnData ({} × {}) - max depth reached</div>'
+    ).format(format_number(n_obs), format_number(n_vars))

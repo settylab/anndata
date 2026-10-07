@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from markupsafe import Markup
 
 from .._repr_constants import (
     DICT_PREVIEW_KEYS,
@@ -424,7 +425,7 @@ def format_invalid_colors_warning(invalid_count: int, *, has_more: bool = False)
     return f"{invalid_count}{suffix} invalid color{s}"
 
 
-def format_index_preview(index: pd.Index, preview_n: int = 5) -> str:
+def format_index_preview(index: pd.Index, preview_n: int = 5) -> Markup:
     """Format a preview of a pandas Index.
 
     Shows first and last items with ellipsis in between for long indices.
@@ -443,7 +444,7 @@ def format_index_preview(index: pd.Index, preview_n: int = 5) -> str:
     """
     n = len(index)
     if n == 0:
-        return "<em>empty</em>"
+        return Markup("<em>empty</em>")
 
     def _format_value(x: object) -> str:
         """Format a single index value, decoding bytes if needed."""
@@ -459,19 +460,37 @@ def format_index_preview(index: pd.Index, preview_n: int = 5) -> str:
     else:
         first = [escape_html(_format_value(x)) for x in index[:preview_n]]
         last = [escape_html(_format_value(x)) for x in index[-preview_n:]]
-        items = [*first, "...", *last]
+        items = [*first, Markup("..."), *last]
 
-    return ", ".join(items)
+    return Markup(", ").join(items)
 
 
-def escape_html(text: str) -> str:
+def escape_html(text: object) -> Markup:
     """Escape HTML special characters and replace null bytes.
 
     Null bytes in user data (e.g., column names like ``"null\\x00byte"``)
     break HTML parsers and cause truncated rendering. They are replaced
     with the Unicode replacement character U+FFFD.
+
+    Returns :class:`~markupsafe.Markup`, so the result is not escaped again
+    when it is passed to ``Markup.format`` or ``Markup.join``.
     """
-    return html.escape(str(text).replace("\x00", "\ufffd"))
+    # the argument is escaped right here, so the result is safe by construction
+    return Markup(html.escape(str(text).replace("\x00", "\ufffd")))  # noqa: S704
+
+
+def trusted_html(value: str | Markup) -> Markup:
+    """Mark ``value`` as trusted HTML (the documented trust boundary).
+
+    A plain ``str`` is accepted wherever extension code supplies HTML
+    (``FormattedOutput.*_html`` fields, ``render_*`` helper arguments) and is
+    emitted verbatim, as it always was. Wrapping it happens here and nowhere
+    else, so this function is the one place to audit. :class:`~markupsafe.Markup`
+    passes through unchanged.
+    """
+    if isinstance(value, Markup):
+        return value
+    return Markup(value)  # noqa: S704 - plain-str extension HTML is trusted
 
 
 def format_memory_size(size_bytes: float) -> str:
