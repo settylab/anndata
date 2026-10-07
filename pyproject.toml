@@ -172,6 +172,7 @@ lint.select = [
     "PTH",  # Pathlib instead of os.path
     "PYI",  # Typing
     "RUF",  # Unused noqa
+    "S704", # Unsafe `Markup(non_literal)`: only trust-boundary sites in `anndata._repr` (tests exempt)
     "SIM",  # Code simplifications
     "TC",   # manage type checking blocks
     "TID",  # Banned imports
@@ -196,7 +197,7 @@ lint.ignore = [
     "TID252",  # We use relative imports from parent modules
 ]
 # PLR0913, PLR0917: tests can use a lot of “arguments” that are actually fixtures
-lint.per-file-ignores."tests/**/*.py" = [ "PLR0913", "PLR0917" ]
+lint.per-file-ignores."tests/**/*.py" = [ "PLR0913", "PLR0917", "S704" ]
 # E721 comparing types, but we specifically are checking that we aren't getting subtypes (views)
 lint.per-file-ignores."tests/test_readwrite.py" = [ "E721" ]
 lint.allowed-confusables = [ "×", "–", "’", "α" ]

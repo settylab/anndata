@@ -158,12 +158,11 @@ def test_repr_html_section_formatter_render_html(adata):
 
 def test_repr_html_section_formatter_render_html_escaping(adata):
     """render_html output is inserted as-is — formatter must escape values."""
-    from markupsafe import Markup
-
     from anndata._repr import (
         SectionFormatter,
         register_formatter,
     )
+    from anndata._repr.utils import escape_html
 
     @register_formatter
     class TestEscapedSection(SectionFormatter):
@@ -181,9 +180,9 @@ def test_repr_html_section_formatter_render_html_escaping(adata):
             return []
 
         def render_html(self, obj, context):
-            # Properly escaped — Markup.format() escapes the str argument
+            # Properly escaped — this is the formatter's responsibility
             val = '<script>alert("xss")</script>'
-            return Markup("<div>{}</div>").format(val)
+            return f"<div>{escape_html(val)}</div>"
 
     try:
         html = adata._repr_html_()

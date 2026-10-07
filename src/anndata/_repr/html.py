@@ -47,7 +47,7 @@ from .core import (
     render_x_entry,
 )
 from .css import get_css
-from .environment import get_env, get_macros
+from .environment import as_markup, get_macros, render_template
 from .javascript import get_javascript
 from .lazy import get_lazy_backing_info, is_lazy_adata
 from .registry import (
@@ -283,24 +283,22 @@ def generate_repr_html(  # noqa: PLR0913
         index_preview_markup = render_index_preview(adata)
         footer_html = _render_footer(adata)
         hints_html = _render_hints()
-        css_html = Markup(get_css())
-        javascript_html = Markup(get_javascript(container_id))
+        # Packaged static assets; ``container_id`` is validated above
+        css_html = Markup(get_css())  # noqa: S704
+        javascript_html = Markup(get_javascript(container_id))  # noqa: S704
 
-    return Markup(
-        get_env()
-        .get_template("anndata.j2")
-        .render(
-            container_id=container_id,
-            depth=depth,
-            style=style,
-            css=css_html,
-            header=header_html,
-            index_preview=index_preview_markup,
-            sections=_render_all_sections(adata, context),
-            footer=footer_html,
-            hints=hints_html,
-            javascript=javascript_html,
-        )
+    return render_template(
+        "anndata.j2",
+        container_id=container_id,
+        depth=depth,
+        style=style,
+        css=css_html,
+        header=header_html,
+        index_preview=index_preview_markup,
+        sections=_render_all_sections(adata, context),
+        footer=footer_html,
+        hints=hints_html,
+        javascript=javascript_html,
     )
 
 
@@ -419,7 +417,7 @@ def _render_custom_section(
     """
     if hasattr(formatter, "render_html"):
         try:
-            return Markup(formatter.render_html(adata, context))
+            return as_markup(formatter.render_html(adata, context))
         except Exception as e:  # noqa: BLE001
             from .._warnings import warn
 
@@ -551,15 +549,12 @@ def _render_header(
 
     search_box = render_search_box(container_id) if show_search else None
 
-    return Markup(
-        get_env()
-        .get_template("header.j2")
-        .render(
-            type_name=type_name,
-            shape_str=shape_str,
-            extras=extras,
-            search_box=search_box,
-        )
+    return render_template(
+        "header.j2",
+        type_name=type_name,
+        shape_str=shape_str,
+        extras=extras,
+        search_box=search_box,
     )
 
 
@@ -578,28 +573,25 @@ def _render_footer(adata: AnnData) -> Markup:
         if is_backed(adata):
             memory_title = "Estimated in-memory size (data on disk not included)"
 
-    return Markup(
-        get_env()
-        .get_template("footer.j2")
-        .render(
-            version=get_anndata_version(),
-            memory_str=memory_str,
-            memory_title=memory_title,
-        )
+    return render_template(
+        "footer.j2",
+        version=get_anndata_version(),
+        memory_str=memory_str,
+        memory_title=memory_title,
     )
 
 
 def _render_hints() -> Markup:
     """Render the static no-CSS / no-JS hint block."""
-    return Markup(get_env().get_template("hints.j2").render())
+    return render_template("hints.j2")
 
 
 def _render_max_depth_indicator(adata: AnnData) -> Markup:
     """Render indicator when max depth is reached."""
     n_obs = getattr(adata, "n_obs", "?")
     n_vars = getattr(adata, "n_vars", "?")
-    return Markup(
-        get_env()
-        .get_template("max_depth_indicator.j2")
-        .render(n_obs_str=format_number(n_obs), n_vars_str=format_number(n_vars))
+    return render_template(
+        "max_depth_indicator.j2",
+        n_obs_str=format_number(n_obs),
+        n_vars_str=format_number(n_vars),
     )

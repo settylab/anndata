@@ -65,7 +65,7 @@ from .core import (
     render_truncation_indicator,
     render_x_entry,
 )
-from .environment import get_env, get_macros
+from .environment import get_macros, render_template
 from .registry import (
     FormattedEntry,
     FormattedOutput,
@@ -88,7 +88,7 @@ def _render_entry_row(
     key: str,
     output: FormattedOutput,
     *,
-    append_type_markup: bool = False,
+    append_type_html: bool = False,
     preview_note: str | None = None,
 ) -> Markup:
     """Render an entry row for DataFrame, mapping, or uns sections.
@@ -102,8 +102,8 @@ def _render_entry_row(
         Entry key/name to display
     output
         FormattedOutput from a TypeFormatter (already includes key validation)
-    append_type_markup
-        If True, append type_markup below type_name (for mapping entries)
+    append_type_html
+        If True, append type_html below type_name (for mapping entries)
     preview_note
         Optional note to prepend to preview (for type hints in uns)
 
@@ -114,7 +114,7 @@ def _render_entry_row(
     entry = FormattedEntry(key=key, output=output)
     return render_formatted_entry(
         entry,
-        append_type_markup=append_type_markup,
+        append_type_html=append_type_html,
         preview_note=preview_note,
     )
 
@@ -211,7 +211,7 @@ def _render_mapping_section(
         value = mapping[key]
         key_context = replace(section_context, key=key)
         output = formatter_registry.format_value(value, key_context)
-        rows.append(_render_entry_row(key, output, append_type_markup=True))
+        rows.append(_render_entry_row(key, output, append_type_html=True))
 
     return render_section(
         section,
@@ -281,8 +281,8 @@ def _render_uns_entry(
     # 1. Try formatter first - handles type hints, color lists, AnnData
     output = formatter_registry.format_value(value, key_context)
 
-    # If a custom formatter produced preview_markup, use it directly
-    if output.preview_markup:
+    # If a custom formatter produced preview_html, use it directly
+    if output.preview_html:
         return _render_entry_row(key, output)
 
     # 2. Check for unhandled type hint (basic formatter matched, not custom)
@@ -507,9 +507,7 @@ def _render_raw_section(
         row_parts.append(Markup("</div>"))
 
     entry_markup = Markup("\n").join(row_parts)
-    return Markup(
-        get_env().get_template("raw_section.j2").render(entry_markup=entry_markup)
-    )
+    return render_template("raw_section.j2", entry_markup=entry_markup)
 
 
 def _generate_raw_repr_html(
@@ -555,13 +553,10 @@ def _generate_raw_repr_html(
     except Exception as e:  # noqa: BLE001
         sections.append(render_error_section("varm", str(e)))
 
-    return Markup(
-        get_env()
-        .get_template("raw_repr.j2")
-        .render(
-            container_id=f"anndata-raw-{uuid.uuid4().hex[:8]}",
-            shape_str=shape_str,
-            index_preview=render_index_preview(raw),
-            sections=sections,
-        )
+    return render_template(
+        "raw_repr.j2",
+        container_id=f"anndata-raw-{uuid.uuid4().hex[:8]}",
+        shape_str=shape_str,
+        index_preview=render_index_preview(raw),
+        sections=sections,
     )

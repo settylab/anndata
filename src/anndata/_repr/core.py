@@ -21,7 +21,7 @@ from .._repr_constants import (
     DEFAULT_PREVIEW_ITEMS,
     ERROR_TRUNCATE_LENGTH,
 )
-from .environment import get_env, get_macros
+from .environment import as_markup, get_macros, render_template
 from .registry import formatter_registry
 from .utils import format_index_preview, format_number
 
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 def render_section(  # noqa: PLR0913
     name: str,
-    entries: Markup,
+    entries_html: str | Markup,
     *,
     n_items: int,
     doc_url: str | None = None,
@@ -53,10 +53,11 @@ def render_section(  # noqa: PLR0913
     ----------
     name
         Display name for the section header (e.g., 'images', 'tables')
-    entries
-        Trusted HTML (``markupsafe.Markup``) for the section body.
-        Typically produced by joining per-entry ``Markup`` values,
-        e.g. ``Markup("\\n").join(render_formatted_entry(e) for e in entries)``.
+    entries_html
+        Trusted HTML for the section body (``Markup`` or a ``str`` that the
+        caller has escaped). Typically produced by joining the rows from
+        ``render_formatted_entry``, e.g.
+        ``"\\n".join(render_formatted_entry(e) for e in entries)``.
     n_items
         Number of items (used for empty check and default count string)
     doc_url
@@ -116,7 +117,9 @@ def render_section(  # noqa: PLR0913
         section_id or name,
         name,
         count_str or f"({pluralize(n_items, 'item')})",
-        Markup('<div class="anndata-section__entries">{}</div>').format(entries),
+        Markup('<div class="anndata-section__entries">{}</div>').format(
+            as_markup(entries_html)
+        ),
         is_open=not should_collapse,
         doc_url=doc_url,
         tooltip=tooltip,
@@ -128,7 +131,7 @@ def render_details_section(  # noqa: PLR0913
     section_id: str,
     name: str,
     count: str | Markup,
-    content: Markup,
+    content_html: str | Markup,
     *,
     is_open: bool,
     doc_url: str | None = None,
@@ -149,8 +152,8 @@ def render_details_section(  # noqa: PLR0913
     count
         Count label next to the name, e.g. ``"(3 items)"``. Plain ``str`` is
         escaped, ``Markup`` passes through.
-    content
-        Trusted section body HTML (``Markup``)
+    content_html
+        Trusted section body HTML (``Markup`` or caller-escaped ``str``)
     is_open
         Whether the section starts expanded
     doc_url
@@ -160,19 +163,16 @@ def render_details_section(  # noqa: PLR0913
     extra_classes
         Additional CSS classes for the ``<details>`` element
     """
-    return Markup(
-        get_env()
-        .get_template("section.j2")
-        .render(
-            section_id=section_id,
-            name=name,
-            count=count,
-            content=content,
-            is_open=is_open,
-            doc_url=doc_url,
-            tooltip=tooltip,
-            extra_classes=extra_classes,
-        )
+    return render_template(
+        "section.j2",
+        section_id=section_id,
+        name=name,
+        count=count,
+        content=as_markup(content_html),
+        is_open=is_open,
+        doc_url=doc_url,
+        tooltip=tooltip,
+        extra_classes=extra_classes,
     )
 
 
@@ -232,10 +232,10 @@ def render_index_preview(obj: object) -> Markup:
             )
         except Exception:  # noqa: BLE001
             previews[attr] = Markup("<em>not available</em>")
-    return Markup(
-        get_env()
-        .get_template("index_preview.j2")
-        .render(obs_preview=previews["obs_names"], var_preview=previews["var_names"])
+    return render_template(
+        "index_preview.j2",
+        obs_preview=previews["obs_names"],
+        var_preview=previews["var_names"],
     )
 
 
@@ -290,16 +290,13 @@ def render_x_entry(obj: AnnData | Raw, context: FormatterContext) -> Markup:
                 state = "format_error"
                 error_msg = f"error formatting: {type(e).__name__}"
 
-    return Markup(
-        get_env()
-        .get_template("x_entry.j2")
-        .render(
-            x_label="X",
-            state=state,
-            type_name=type_name,
-            css_class=css_class,
-            error_msg=error_msg,
-        )
+    return render_template(
+        "x_entry.j2",
+        x_label="X",
+        state=state,
+        type_name=type_name,
+        css_class=css_class,
+        error_msg=error_msg,
     )
 
 
@@ -308,7 +305,7 @@ def render_formatted_entry(
     section: str = "",
     *,
     extra_warnings: list[str] | None = None,
-    append_type_markup: bool = False,
+    append_type_html: bool = False,
     preview_note: str | None = None,
 ) -> Markup:
     """
@@ -325,8 +322,8 @@ def render_formatted_entry(
         Optional section name (used for meta column rendering)
     extra_warnings
         Additional warnings to display (e.g., key validation warnings)
-    append_type_markup
-        If True, append type_markup below type_name instead of replacing it.
+    append_type_html
+        If True, append type_html below type_name instead of replacing it.
         Used for mapping entries (obsm, varm, etc.) to show extra content.
     preview_note
         Optional note to prepend to preview text (for type hints in uns)
@@ -366,7 +363,7 @@ def render_formatted_entry(
             output=FormattedOutput(
                 type_name="AnnData (150 × 30)",
                 css_class=CSS_DTYPE_ANNDATA,
-                expanded_markup=generate_repr_html(adata, depth=1),
+                expanded_html=generate_repr_html(adata, depth=1),
             ),
         )
         html = render_formatted_entry(entry)
@@ -395,45 +392,41 @@ def render_formatted_entry(
     output = entry.output
     all_warnings = (extra_warnings or []) + list(output.warnings)
     has_error = output.error is not None or not output.is_serializable
-    has_expandable_content = output.expanded_markup is not None
+    has_expandable_content = output.expanded_html is not None
     has_categories = output.css_class == CSS_DTYPE_CATEGORY and bool(
-        output.preview_markup
+        output.preview_html
     )
     has_columns_list = output.css_class == CSS_DTYPE_DATAFRAME and bool(
-        output.preview_markup
+        output.preview_html
     )
 
-    # Error takes precedence over preview_markup, which takes precedence over
+    # Error takes precedence over preview_html, which takes precedence over
     # preview
-    preview_markup = output.preview_markup
+    preview_html = as_markup(output.preview_html)
     preview_text = output.preview
     if output.error:
-        preview_markup = get_macros().error_preview(output.error)
+        preview_html = get_macros().error_preview(output.error)
 
     if preview_note and preview_text:
         preview_text = f"{preview_note} {preview_text}"
     elif preview_note:
         preview_text = preview_note
 
-    rendered = (
-        get_env()
-        .get_template("entry.j2")
-        .render(
-            entry_key=entry.key,
-            type_name=output.type_name,
-            css_class=output.css_class,
-            type_markup=output.type_markup,
-            tooltip=output.tooltip,
-            all_warnings=all_warnings,
-            is_not_serializable=not output.is_serializable,
-            has_error=has_error,
-            has_expandable_content=has_expandable_content,
-            has_columns_list=has_columns_list,
-            has_categories_list=has_categories,
-            append_type_markup=append_type_markup,
-            preview_markup=preview_markup,
-            preview_text=preview_text,
-            expanded_markup=output.expanded_markup,
-        )
+    return render_template(
+        "entry.j2",
+        entry_key=entry.key,
+        type_name=output.type_name,
+        css_class=output.css_class,
+        type_html=as_markup(output.type_html),
+        tooltip=output.tooltip,
+        all_warnings=all_warnings,
+        is_not_serializable=not output.is_serializable,
+        has_error=has_error,
+        has_expandable_content=has_expandable_content,
+        has_columns_list=has_columns_list,
+        has_categories_list=has_categories,
+        append_type_html=append_type_html,
+        preview_html=preview_html,
+        preview_text=preview_text,
+        expanded_html=as_markup(output.expanded_html),
     )
-    return Markup(rendered)

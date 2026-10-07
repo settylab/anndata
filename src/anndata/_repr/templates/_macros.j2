@@ -58,12 +58,12 @@
 {%- endmacro -%}
 
 {# Type cell: second column of an entry row. Combines type label, warnings,
-   optional wrap buttons, and optional custom type_markup (either as replacement
-   or appended below the label when append_type_markup=True). #}
-{%- macro type_cell(type_name, css_class, type_markup=None, tooltip='', all_warnings=None, is_not_serializable=false, has_columns_list=false, has_categories_list=false, append_type_markup=false) -%}
+   optional wrap buttons, and optional custom type_html (either as replacement
+   or appended below the label when append_type_html=True). #}
+{%- macro type_cell(type_name, css_class, type_html=None, tooltip='', all_warnings=None, is_not_serializable=false, has_columns_list=false, has_categories_list=false, append_type_html=false) -%}
 <span class="anndata-entry__type" style="display:inline-block;min-width:var(--anndata-type-col-width,180px);vertical-align:top">
-{%- if type_markup and not append_type_markup -%}
-{{ type_markup }}
+{%- if type_html and not append_type_html -%}
+{{ type_html }}
 {%- elif tooltip -%}
 <span class="{{ css_class }}" title="{{ tooltip }}">{{ type_name }}</span>
 {%- else -%}
@@ -72,18 +72,18 @@
 {{ warning_icon(all_warnings or [], is_not_serializable) }}
 {%- if has_columns_list %}{{ wrap_button('anndata-columns__wrap') }}{% endif -%}
 {%- if has_categories_list %}{{ wrap_button('anndata-categories__wrap') }}{% endif -%}
-{%- if type_markup and append_type_markup -%}
-<span class="anndata-entry__custom">{{ type_markup }}</span>
+{%- if type_html and append_type_html -%}
+<span class="anndata-entry__custom">{{ type_html }}</span>
 {%- endif -%}
 </span>
 {%- endmacro -%}
 
 {# Preview cell: third column of an entry row. Either trusted Markup or muted
    plain text. #}
-{%- macro preview_cell(preview_markup=None, preview_text=None) -%}
+{%- macro preview_cell(preview_html=None, preview_text=None) -%}
 <span class="anndata-entry__preview" style="display:inline-block;vertical-align:top">
-{%- if preview_markup -%}
-{{ preview_markup }}
+{%- if preview_html -%}
+{{ preview_html }}
 {%- elif preview_text -%}
 {{ muted_span(preview_text) }}
 {%- endif -%}

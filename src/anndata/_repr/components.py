@@ -25,7 +25,7 @@ from .._repr_constants import (
     CSS_BADGE_VIEW,
     CSS_ENTRY,
 )
-from .environment import get_macros
+from .environment import as_markup, get_macros
 from .utils import sanitize_css_color
 
 
@@ -190,8 +190,7 @@ def render_nested_content(html_content: str | Markup) -> Markup:
     -------
     ``Markup`` HTML closing the summary and wrapping nested content.
     """
-    body = html_content if isinstance(html_content, Markup) else Markup(html_content)
-    return get_macros().nested_content(body)
+    return get_macros().nested_content(as_markup(html_content))
 
 
 def render_badge(
@@ -359,7 +358,7 @@ class TypeCellConfig:
         The type name to display (e.g., "ndarray (100, 50) float32")
     css_class
         CSS class for the type span (e.g., "anndata-dtype--ndarray")
-    type_markup
+    type_html
         Optional custom HTML content for the type cell
     tooltip
         Optional tooltip for the type label
@@ -371,8 +370,8 @@ class TypeCellConfig:
         Whether to show columns wrap button
     has_categories_list
         Whether to show categories wrap button
-    append_type_markup
-        If True, type_markup is appended below type_name instead of replacing it
+    append_type_html
+        If True, type_html is appended below type_name instead of replacing it
 
     Examples
     --------
@@ -395,13 +394,13 @@ class TypeCellConfig:
 
     type_name: str
     css_class: str
-    type_markup: Markup | None = None
+    type_html: str | Markup | None = None
     tooltip: str = ""
     warnings: list[str] = field(default_factory=list)
     is_not_serializable: bool = False
     has_columns_list: bool = False
     has_categories_list: bool = False
-    append_type_markup: bool = False
+    append_type_html: bool = False
 
 
 def render_entry_type_cell(config: TypeCellConfig) -> Markup:
@@ -409,19 +408,19 @@ def render_entry_type_cell(config: TypeCellConfig) -> Markup:
 
     This is a unified helper that handles all type cell variations:
     - Type label with optional tooltip
-    - Custom type_markup (as replacement or appended content)
+    - Custom type_html (as replacement or appended content)
     - Warning icon
     - Expand/wrap buttons
 
-    The type_markup and append_type_markup config fields control content rendering:
+    The type_html and append_type_html config fields control content rendering:
 
-    1. No type_markup: Shows type_name in a styled span
+    1. No type_html: Shows type_name in a styled span
        ``<span class="anndata-dtype--X">type_name</span>``
 
-    2. type_markup with append_type_markup=False (default): type_markup REPLACES type_name
+    2. type_html with append_type_html=False (default): type_html REPLACES type_name
        Used for fully custom type content (e.g., category swatches instead of text)
 
-    3. type_markup with append_type_markup=True: type_markup is shown BELOW type_name
+    3. type_html with append_type_html=True: type_html is shown BELOW type_name
        Used to add extra content while keeping the type label
        (e.g., showing category list below "categorical" label)
 
@@ -437,18 +436,18 @@ def render_entry_type_cell(config: TypeCellConfig) -> Markup:
     return get_macros().type_cell(
         type_name=config.type_name,
         css_class=config.css_class,
-        type_markup=config.type_markup,
+        type_html=as_markup(config.type_html),
         tooltip=config.tooltip,
         all_warnings=config.warnings,
         is_not_serializable=config.is_not_serializable,
         has_columns_list=config.has_columns_list,
         has_categories_list=config.has_categories_list,
-        append_type_markup=config.append_type_markup,
+        append_type_html=config.append_type_html,
     )
 
 
 def render_entry_preview_cell(
-    preview_markup: Markup | None = None,
+    preview_html: str | Markup | None = None,
     preview_text: str | None = None,
 ) -> Markup:
     """Render the preview cell (third column) for an entry row.
@@ -458,7 +457,7 @@ def render_entry_preview_cell(
 
     Parameters
     ----------
-    preview_markup
+    preview_html
         Trusted HTML (``Markup``) for preview (highest priority).
     preview_text
         Plain text preview (autoescaped and muted).
@@ -468,6 +467,6 @@ def render_entry_preview_cell(
     ``Markup`` HTML for the preview cell.
     """
     return get_macros().preview_cell(
-        preview_markup=preview_markup,
+        preview_html=as_markup(preview_html),
         preview_text=preview_text,
     )

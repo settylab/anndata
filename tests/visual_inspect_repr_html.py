@@ -74,7 +74,6 @@ from typing import TYPE_CHECKING, Protocol
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
-from markupsafe import Markup
 
 import anndata as ad
 
@@ -93,6 +92,7 @@ from anndata._repr import (  # noqa: E402
     FormatterContext,
     SectionFormatter,
     TypeFormatter,
+    escape_html,
     extract_uns_type_hint,
     formatter_registry,
     register_formatter,
@@ -272,7 +272,7 @@ if HAS_NETWORKX:
                     type_name=f"DiGraph ({n_nodes} nodes, {n_leaves} leaves)",
                     css_class="anndata-dtype--tree",
                     tooltip=f"Phylogenetic tree with {n_nodes} total nodes",
-                    expanded_markup=Markup(svg_html),
+                    expanded_html=svg_html,
                 )
                 entries.append(FormattedEntry(key=key, output=output))
             return entries
@@ -311,7 +311,7 @@ if HAS_NETWORKX:
                     type_name=f"DiGraph ({n_nodes} nodes, {n_leaves} leaves)",
                     css_class="anndata-dtype--tree",
                     tooltip=f"Phylogenetic tree with {n_nodes} total nodes",
-                    expanded_markup=Markup(svg_html),
+                    expanded_html=svg_html,
                 )
                 entries.append(FormattedEntry(key=key, output=output))
             return entries
@@ -329,7 +329,7 @@ if HAS_NETWORKX:
 
         Renders like the X entry — a single non-foldable line showing
         key=value pairs for label, alignment, and allow_overlap.
-        All values are escaped via ``Markup(...).format(...)``.
+        All values are escaped via ``escape_html(repr(val))``.
         """
 
         @property
@@ -372,9 +372,9 @@ if HAS_NETWORKX:
                     entries.append(FormattedEntry(key=label, output=output))
             return entries
 
-        def render_html(self, obj, context: FormatterContext) -> Markup:
+        def render_html(self, obj, context: FormatterContext) -> str:
             """Render as a compact line instead of a foldable section."""
-            pairs: list[Markup] = []
+            pairs = []
             for attr, label in [
                 ("_tree_label", "label"),
                 ("_alignment", "alignment"),
@@ -383,17 +383,16 @@ if HAS_NETWORKX:
                 val = getattr(obj, attr, None)
                 if val is not None:
                     pairs.append(
-                        Markup(
-                            '<span style="color:var(--anndata-text-secondary,#6c757d);">{label}=</span>{val}'
-                        ).format(label=label, val=repr(val))
+                        f'<span style="color:var(--anndata-text-secondary,#6c757d);">{label}=</span>'
+                        f"{escape_html(repr(val))}"
                     )
-            summary = Markup(" &nbsp; ").join(pairs)
-            return Markup(
+            summary = " &nbsp; ".join(pairs)
+            return (
                 '<div class="anndata-x__entry">'
-                "<span>tree</span>"
-                "<span>{summary}</span>"
+                f"<span>tree</span>"
+                f"<span>{summary}</span>"
                 "</div>"
-            ).format(summary=summary)
+            )
 
     class TreeDataStandIn(AnnData):
         """Minimal stand-in exposing TreeData's attributes (``obst``, ``vart``, tree metadata).
@@ -507,7 +506,7 @@ try:
                     type_name=f"AnnData ({shape_str})",
                     css_class="anndata-dtype--anndata",
                     tooltip=f"Modality: {mod_name}",
-                    expanded_markup=Markup(nested_html) if can_expand else None,
+                    expanded_html=nested_html if can_expand else None,
                     is_serializable=True,
                 )
                 entries.append(FormattedEntry(key=mod_name, output=output))
@@ -643,11 +642,9 @@ try:
                     )
                 )
                 parts.append(
-                    Markup(
-                        '<span class="anndata-file-path" style="font-family:ui-monospace,monospace;'
-                        'font-size:11px;color:var(--anndata-text-secondary, #6c757d);">'
-                        "{path}</span>"
-                    ).format(path=self.path)
+                    f'<span class="anndata-file-path" style="font-family:ui-monospace,monospace;'
+                    f'font-size:11px;color:var(--anndata-text-secondary, #6c757d);">'
+                    f"{escape_html(self.path)}</span>"
                 )
 
             # Search box using render_search_box() helper
@@ -690,12 +687,10 @@ try:
             for cs_name in self.coordinate_systems:
                 tooltip = f"Elements: {elements_str}"
                 cs_parts.append(
-                    Markup(
-                        '<span title="{tooltip}" style="'
-                        "font-family:ui-monospace,monospace;font-size:11px;"
-                        'color:var(--anndata-accent, #0d6efd);cursor:help;">'
-                        "'{cs_name}'</span>"
-                    ).format(tooltip=tooltip, cs_name=cs_name)
+                    f'<span title="{escape_html(tooltip)}" style="'
+                    f"font-family:ui-monospace,monospace;font-size:11px;"
+                    f'color:var(--anndata-accent, #0d6efd);cursor:help;">'
+                    f"'{escape_html(cs_name)}'</span>"
                 )
 
             parts.append(", ".join(cs_parts))
@@ -712,9 +707,7 @@ try:
             for name, info in self.images.items():
                 # Build meta content (dimensions info) for the META column
                 dims_str = ", ".join(info.get("dims", ["y", "x"]))
-                meta = Markup('<span class="anndata-meta-info">[{}]</span>').format(
-                    dims_str
-                )
+                meta = f'<span class="anndata-meta-info">[{dims_str}]</span>'
 
                 # Create a FormattedEntry with FormattedOutput
                 entry = FormattedEntry(
@@ -722,19 +715,16 @@ try:
                     output=FormattedOutput(
                         type_name=f"DataArray {info['shape']} {info['dtype']}",
                         css_class="anndata-dtype--ndarray",
-                        preview_markup=meta,  # Content in preview column (rightmost)
+                        preview_html=meta,  # Content in preview column (rightmost)
                     ),
                 )
                 # render_formatted_entry() creates the table row HTML
                 rows.append(render_formatted_entry(entry))
 
-            # render_section() wraps rows in a collapsible section.
-            # Use Markup("\n").join so the joined result stays Markup — a
-            # plain str.join(...) would yield a bare str that Jinja autoescapes
-            # when render_section interpolates it.
+            # render_section() wraps rows in a collapsible section
             return render_section(
                 "images",
-                Markup("\n").join(rows),
+                "\n".join(rows),
                 n_items=len(self.images),
                 tooltip="Image data (xarray.DataArray)",
             )
@@ -744,23 +734,21 @@ try:
             rows = []
             for name, info in self.labels.items():
                 dims_str = ", ".join(info.get("dims", ["y", "x"]))
-                meta = Markup('<span class="anndata-meta-info">[{}]</span>').format(
-                    dims_str
-                )
+                meta = f'<span class="anndata-meta-info">[{dims_str}]</span>'
 
                 entry = FormattedEntry(
                     key=name,
                     output=FormattedOutput(
                         type_name=f"Labels {info['shape']} {info['dtype']}",
                         css_class="anndata-dtype--ndarray",
-                        preview_markup=meta,
+                        preview_html=meta,
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
 
             return render_section(
                 "labels",
-                Markup("\n").join(rows),
+                "\n".join(rows),
                 n_items=len(self.labels),
                 tooltip="Segmentation masks (xarray.DataArray)",
             )
@@ -769,23 +757,21 @@ try:
             """Build points section."""
             rows = []
             for name, info in self.points.items():
-                meta = Markup(
-                    '<span class="anndata-meta-info">{}D coordinates</span>'
-                ).format(info["n_dims"])
+                meta = f'<span class="anndata-meta-info">{info["n_dims"]}D coordinates</span>'
 
                 entry = FormattedEntry(
                     key=name,
                     output=FormattedOutput(
                         type_name=f"dask.DataFrame ({format_number(info['n_points'])} × {info['n_dims']})",
                         css_class="anndata-dtype--dataframe",
-                        preview_markup=meta,
+                        preview_html=meta,
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
 
             return render_section(
                 "points",
-                Markup("\n").join(rows),
+                "\n".join(rows),
                 n_items=len(self.points),
                 tooltip="Point annotations (dask.DataFrame)",
             )
@@ -794,23 +780,21 @@ try:
             """Build shapes section."""
             rows = []
             for name, info in self.shapes.items():
-                meta = Markup('<span class="anndata-meta-info">{}</span>').format(
-                    info["geometry_type"]
-                )
+                meta = f'<span class="anndata-meta-info">{info["geometry_type"]}</span>'
 
                 entry = FormattedEntry(
                     key=name,
                     output=FormattedOutput(
                         type_name=f"GeoDataFrame ({format_number(info['n_shapes'])} shapes)",
                         css_class="anndata-dtype--dataframe",
-                        preview_markup=meta,
+                        preview_html=meta,
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
 
             return render_section(
                 "shapes",
-                Markup("\n").join(rows),
+                "\n".join(rows),
                 n_items=len(self.shapes),
                 tooltip="Vector shapes (geopandas.GeoDataFrame)",
             )
@@ -833,21 +817,20 @@ try:
                     show_search=False,
                 )
 
-                # FormattedOutput with expanded_markup makes it collapsible
+                # FormattedOutput with expanded_html makes it collapsible
                 entry = FormattedEntry(
                     key=name,
                     output=FormattedOutput(
                         type_name=f"AnnData ({adata.n_obs} × {adata.n_vars})",
                         css_class="anndata-dtype--anndata",
-                        # Makes the nested content collapsible
-                        expanded_markup=Markup(nested_html),
+                        expanded_html=nested_html,  # Makes the nested content collapsible
                     ),
                 )
                 rows.append(render_formatted_entry(entry))
 
             return render_section(
                 "tables",
-                Markup("\n").join(rows),
+                "\n".join(rows),
                 n_items=len(self.tables),
                 tooltip="Annotation tables (AnnData)",
             )
@@ -878,7 +861,7 @@ try:
                 rows = [render_formatted_entry(entry) for entry in entries]
                 section_html = render_section(
                     formatter.section_name,
-                    Markup("\n").join(rows),
+                    "\n".join(rows),
                     n_items=len(entries),
                     tooltip=getattr(formatter, "tooltip", ""),
                 )
@@ -1420,7 +1403,7 @@ def create_test_treedata() -> tuple[AnnData, str]:
         except Exception as e:  # noqa: BLE001
             note = (
                 f"Real <code>treedata</code> failed with this anndata "
-                f"(<code>{html_mod.escape(f'{type(e).__name__}: {e}')}</code>); "
+                f"(<code>{escape_html(f'{type(e).__name__}: {e}')}</code>); "
                 "rendering <code>TreeDataStandIn</code> instead."
             )
             tdata = TreeDataStandIn(**kwargs)
@@ -2841,7 +2824,7 @@ def _html_disabled() -> CaseOutput:
         result = adata._repr_html_()
     if result is not None:
         return f"<p style='color:#cf222e'>Expected None, got {len(result)} chars of HTML.</p>{result}"
-    return f"<pre>_repr_html_() -> None\n\n{html_mod.escape(repr(adata))}</pre>"
+    return f"<pre>_repr_html_() -> None\n\n{escape_html(repr(adata))}</pre>"
 
 
 @dataclass(frozen=True)
@@ -2901,7 +2884,7 @@ def render_theme_panes(envs: Sequence[ThemeEnv], repr_html: str) -> str:
         )
         panes.append(
             '<figure class="vt-pane">'
-            f"<figcaption>{html_mod.escape(env.label)} · OS {env.os} · expect {env.expect}</figcaption>"
+            f"<figcaption>{escape_html(env.label)} · OS {env.os} · expect {env.expect}</figcaption>"
             + iframe(doc, title=env.label, style=f"color-scheme:{env.os};")
             + "</figure>"
         )
@@ -3677,19 +3660,19 @@ class AnalysisHistoryFormatter(TypeFormatter):
         runs = data.get("runs", [])
         params = data.get("params", {})
 
-        html_parts = [Markup('<div style="font-size:11px;">')]
+        html_parts = ['<div style="font-size:11px;">']
         if runs:
-            html_parts.append(Markup("<strong>{} runs</strong>").format(len(runs)))
+            html_parts.append(f"<strong>{len(runs)} runs</strong>")
         if params:
             param_str = ", ".join(f"{k}={v}" for k, v in list(params.items())[:3])
             if len(params) > 3:
                 param_str += "..."
-            html_parts.append(Markup(" · params: {}").format(param_str))
-        html_parts.append(Markup("</div>"))
+            html_parts.append(f" · params: {escape_html(param_str)}")
+        html_parts.append("</div>")
 
         return FormattedOutput(
             type_name="analysis history",
-            preview_markup=Markup("").join(html_parts),
+            preview_html="".join(html_parts),  # Use preview_html for inline preview
         )
 
 
@@ -3854,24 +3837,18 @@ class OntologyAnnotatedCategoricalFormatter(TypeFormatter):
         type_name = f"category[{registry}] ({n_cats})"
 
         categories = list(obj.cat.categories[:5])
-        cat_html = Markup(", ").join(
-            Markup(
-                '<span style="color: var(--anndata-category-color, #666);">{}</span>'
-            ).format(str(c))
+        cat_html = ", ".join(
+            f'<span style="color: var(--anndata-category-color, #666);">{escape_html(str(c))}</span>'
             for c in categories
         )
         if n_cats > 5:
-            cat_html += Markup(' <span style="color: #888;">...+{}</span>').format(
-                n_cats - 5
-            )
+            cat_html += f' <span style="color: #888;">...+{n_cats - 5}</span>'
         if validated:
-            cat_html += Markup(
+            cat_html += (
                 ' <span style="color: #28a745;" title="All values validated">✓</span>'
             )
         else:
-            cat_html += Markup(
-                ' <span style="color: #fd7e14;" title="{n} unmapped values">⚠ {n} unmapped</span>'
-            ).format(n=unmapped_count)
+            cat_html += f' <span style="color: #fd7e14;" title="{unmapped_count} unmapped values">⚠ {unmapped_count} unmapped</span>'
 
         tooltip_parts = [f"Registry: {registry}"]
         if ontology_id:
@@ -3884,7 +3861,7 @@ class OntologyAnnotatedCategoricalFormatter(TypeFormatter):
             type_name=type_name,
             css_class="anndata-dtype--category",
             tooltip="\n".join(tooltip_parts),
-            preview_markup=cat_html,
+            preview_html=cat_html,
             warnings=[]
             if validated
             else [f"{unmapped_count} values not mapped to ontology"],
@@ -4138,7 +4115,7 @@ def _link_refs(text: str, by_slug: dict[str, Case]) -> str:
         c = by_slug.get(m.group(1))
         if c is None:
             return f"<code>[[{m.group(1)}]] (unknown case)</code>"
-        return f'<a href="#{c.slug}">{c.number} {html_mod.escape(c.title)}</a>'
+        return f'<a href="#{c.slug}">{c.number} {escape_html(c.title)}</a>'
 
     return re.sub(r"\[\[([a-z0-9-]+)\]\]", repl, text)
 
@@ -4146,13 +4123,13 @@ def _link_refs(text: str, by_slug: dict[str, Case]) -> str:
 def _render_case(r: CaseResult, by_slug: dict[str, Case]) -> str:
     c = r.case
     expect = "".join(f"<li>{_link_refs(e, by_slug)}</li>" for e in c.expect)
-    tags = "".join(f'<span class="vt-tag">{html_mod.escape(t)}</span>' for t in c.tags)
+    tags = "".join(f'<span class="vt-tag">{escape_html(t)}</span>' for t in c.tags)
     timing = f" · {r.seconds:.2f}s" if r.status != "skipped" else ""
     size = f" · {len(r.html) / 1024:.0f} KB HTML" if r.html else ""
     parts = [
         f'<section id="{c.slug}" class="vt-case">',
         (
-            f'<h3><span class="vt-num">{c.number}</span>{html_mod.escape(c.title)}'
+            f'<h3><span class="vt-num">{c.number}</span>{escape_html(c.title)}'
             f'<a class="vt-anchor" href="#{c.slug}">#{c.slug}</a></h3>'
         ),
         f'<div class="vt-meta">{tags}{timing}{size}</div>',
@@ -4166,7 +4143,7 @@ def _render_case(r: CaseResult, by_slug: dict[str, Case]) -> str:
     if r.note:
         parts.append(f'<div class="vt-note">{r.note}</div>')
     if r.warnings:
-        items = "".join(f"<li>{html_mod.escape(w)}</li>" for w in r.warnings)
+        items = "".join(f"<li>{escape_html(w)}</li>" for w in r.warnings)
         parts.append(
             f'<details class="vt-warnings"><summary>{len(r.warnings)} Python warning(s) '
             f"emitted while building/rendering</summary><ul>{items}</ul></details>"
@@ -4174,13 +4151,11 @@ def _render_case(r: CaseResult, by_slug: dict[str, Case]) -> str:
     if r.status == "ok":
         parts.append(f'<div class="vt-output">{r.html}</div>')
     elif r.status == "skipped":
-        parts.append(
-            f'<div class="vt-status skipped">{html_mod.escape(r.reason)}</div>'
-        )
+        parts.append(f'<div class="vt-status skipped">{escape_html(r.reason)}</div>')
     else:
         parts.append(
             '<div class="vt-status failed"><b>Case raised an exception</b>'
-            f"<pre>{html_mod.escape(r.reason)}</pre></div>"
+            f"<pre>{escape_html(r.reason)}</pre></div>"
         )
     parts.append("</section>")
     return "\n".join(parts)
@@ -4199,16 +4174,16 @@ def render_page(results: Sequence[CaseResult]) -> str:
             continue
         n = _CATEGORY_INDEX[cat.key]
         toc.append(
-            f'<h4><a href="#cat-{cat.key}">{n}. {html_mod.escape(cat.title)}</a></h4>'
+            f'<h4><a href="#cat-{cat.key}">{n}. {escape_html(cat.title)}</a></h4>'
         )
         toc.extend(
             f'<a href="#{r.case.slug}"><span class="vt-dot {r.status}"></span>'
-            f"{r.case.number} {html_mod.escape(r.case.title)}</a>"
+            f"{r.case.number} {escape_html(r.case.title)}</a>"
             for r in cat_results
         )
         body.append(
-            f'<h2 id="cat-{cat.key}" class="vt-cat">{n}. {html_mod.escape(cat.title)}</h2>'
-            f'<p class="vt-cat-blurb">{html_mod.escape(cat.blurb)}</p>'
+            f'<h2 id="cat-{cat.key}" class="vt-cat">{n}. {escape_html(cat.title)}</h2>'
+            f'<p class="vt-cat-blurb">{escape_html(cat.blurb)}</p>'
         )
         body.extend(_render_case(r, by_slug) for r in cat_results)
 
@@ -4217,7 +4192,7 @@ def render_page(results: Sequence[CaseResult]) -> str:
     }
     problems = [r for r in results if r.status != "ok"]
     problem_links = ", ".join(
-        f'<a href="#{r.case.slug}">{r.case.number} {html_mod.escape(r.case.title)}</a> ({r.status})'
+        f'<a href="#{r.case.slug}">{r.case.number} {escape_html(r.case.title)}</a> ({r.status})'
         for r in problems
     )
 
@@ -4226,9 +4201,9 @@ def render_page(results: Sequence[CaseResult]) -> str:
         for t in r.case.tags:
             tag_index.setdefault(t, []).append(r.case)
     coverage = "".join(
-        f"<div><b>{html_mod.escape(t)}</b>: "
+        f"<div><b>{escape_html(t)}</b>: "
         + ", ".join(
-            f'<a href="#{c.slug}" title="{html_mod.escape(c.title)}">'
+            f'<a href="#{c.slug}" title="{escape_html(c.title)}">'
             f'<span class="vt-dot {status_of[c.slug]}"></span>{c.number}</a>'
             for c in cases
         )
@@ -4251,7 +4226,7 @@ def render_page(results: Sequence[CaseResult]) -> str:
 <div class="vt-toolbar"><button onclick="document.body.classList.toggle('dark-mode')">Toggle dark mode</button></div>
 <h1>AnnData <code>_repr_html_</code> visual test</h1>
 <div class="vt-summary">
-<p style="margin-top:0">anndata {html_mod.escape(version("anndata"))} · Python {platform.python_version()} ·
+<p style="margin-top:0">anndata {escape_html(version("anndata"))} · Python {platform.python_version()} ·
 pandas {pd.__version__} · numpy {np.__version__} · generated {generated}</p>
 <p><span class="vt-dot ok"></span>{counts["ok"]} rendered ·
 <span class="vt-dot skipped"></span>{counts["skipped"]} skipped ·

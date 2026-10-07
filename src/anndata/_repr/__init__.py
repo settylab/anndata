@@ -83,16 +83,16 @@ The system is designed to be extensible via two registry patterns:
                 return FormattedOutput(
                     type_name=f"MyArray {obj.shape}",
                     css_class="anndata-dtype--myarray",
-                    # ``preview_markup`` takes trusted HTML. Build it with
+                    # ``preview_html`` takes trusted HTML. Build it with
                     # ``Markup('<tag>{}</tag>').format(value)`` — MarkupSafe
                     # autoescapes each non-``Markup`` arg at that boundary.
-                    preview_markup=Markup(
+                    preview_html=Markup(
                         '<span class="mypackage-summary">{} items</span>'
                     ).format(obj.n_items),
                 )
 
     **Preview contract**: if no custom HTML is needed, prefer the plain-text
-    ``preview`` field (autoescaped end-to-end). Use ``preview_markup`` when
+    ``preview`` field (autoescaped end-to-end). Use ``preview_html`` when
     you need custom structure. Three valid idioms:
 
     - ``Markup('<tag>{}</tag>').format(value)`` — standard MarkupSafe pattern;
@@ -115,7 +115,7 @@ The system is designed to be extensible via two registry patterns:
        ``FormattedOutput(error="reason")`` directly. The row will be highlighted
        red and the error shown in the preview column.
 
-    When ``error`` is set, it takes precedence over ``preview`` and ``preview_markup``.
+    When ``error`` is set, it takes precedence over ``preview`` and ``preview_html``.
 
     Example - format by embedded type hint (for tagged data in uns)::
 
@@ -138,7 +138,7 @@ The system is designed to be extensible via two registry patterns:
                 hint, data = extract_uns_type_hint(obj)
                 return FormattedOutput(
                     type_name="config",
-                    preview_markup=Markup(
+                    preview_html=Markup(
                         '<span class="anndata-text--muted">{}</span>'
                     ).format(data.get("name", "(unnamed)")),
                 )
@@ -316,7 +316,7 @@ their own ``_repr_html_``, you can reuse anndata's CSS, JavaScript, and helpers.
         key="table",
         output=FormattedOutput(
             type_name=f"AnnData ({adata.n_obs} x {adata.n_vars})",
-            expanded_markup=generate_repr_html(adata, depth=1, max_depth=3),
+            expanded_html=generate_repr_html(adata, depth=1, max_depth=3),
         ),
     )
 
@@ -401,6 +401,7 @@ from .registry import (  # noqa: E402
 
 # HTML rendering helpers for building custom sections
 from .utils import (  # noqa: E402
+    escape_html,
     format_memory_size,
     format_number,
     validate_key,
@@ -439,6 +440,7 @@ __all__ = [  # noqa: RUF022  # organized by category, not alphabetically
     "get_css",
     "get_javascript",
     "get_macros",
+    "escape_html",
     "format_number",
     "format_memory_size",
     "render_section",

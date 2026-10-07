@@ -11,6 +11,7 @@ This module provides:
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -464,6 +465,19 @@ def format_index_preview(index: pd.Index, preview_n: int = 5) -> Markup:
         ]
 
     return Markup(", ").join(items)
+
+
+def escape_html(text: str) -> str:
+    """Escape HTML special characters and replace null bytes.
+
+    Null bytes in user data (e.g., column names like ``"null\\x00byte"``)
+    break HTML parsers and cause truncated rendering. They are replaced
+    with the Unicode replacement character U+FFFD.
+
+    Use this when building ``*_html`` strings by hand; plain-text fields
+    (``preview``, ``tooltip``, ...) are escaped by the templates already.
+    """
+    return html.escape(str(text).replace("\x00", "\ufffd"))
 
 
 def format_memory_size(size_bytes: float) -> str:

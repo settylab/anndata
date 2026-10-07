@@ -1517,70 +1517,70 @@ Emoji: 💀💀💀💀💀
         assert "\x00" not in html, "NUL leaked into rendered HTML"
 
 
-class TestMarkupAutoescapeContract:
-    """Verify the Markup trust boundary is enforced by Jinja autoescape.
+class TestHtmlTrustBoundary:
+    """Verify the ``*_html`` trust boundary and autoescape of plain-text fields.
 
-    FormattedOutput.{type_markup, preview_markup, expanded_markup} are typed
-    ``Markup | None``. An ecosystem extension that violates the contract by
-    passing a bare ``str`` with HTML must get its input autoescaped —
-    the trust boundary is a type-level assertion, not a convention.
-
-    These tests deliberately violate the contract to prove the safety net.
+    ``FormattedOutput.{type_html, preview_html, expanded_html}`` are typed
+    ``str | Markup``. A plain ``str`` there is trusted verbatim (wrapped in
+    ``Markup`` at the single ``as_markup`` boundary), as in the f-string
+    implementation; the plain-text fields are always autoescaped by the
+    templates, and ``Markup.format`` escapes interpolated values.
     """
 
     ATTACK = '<script>alert("xss")</script>'
     ESCAPED = "&lt;script&gt;alert(&#34;xss&#34;)&lt;/script&gt;"
 
-    def _register_and_render(self, *, field: str) -> str:
-        """Register a one-off TypeFormatter that sets ``field`` to bare str and render."""
+    def _register_and_render(self, **fields: object) -> str:
+        """Register a one-off TypeFormatter that sets ``fields`` and render."""
         from anndata._repr.registry import (
             FormattedOutput,
             TypeFormatter,
             register_formatter,
         )
 
-        attack = self.ATTACK
-
-        class _ContractViolator(TypeFormatter):
+        class _Formatter(TypeFormatter):
             priority = 10000  # beat every built-in formatter
 
             def can_format(self, obj, context):
-                return isinstance(obj, _ContractViolator._Sentinel)
+                return isinstance(obj, _Formatter._Sentinel)
 
             def format(self, obj, context):
-                # Bare str — violates the Markup | None contract.
-                return FormattedOutput(type_name="violator", **{field: attack})
+                return FormattedOutput(type_name="violator", **fields)
 
             class _Sentinel:
                 pass
 
-        formatter = _ContractViolator()
+        formatter = _Formatter()
         register_formatter(formatter)
         try:
             adata = AnnData(np.zeros((2, 2)))
-            adata.uns["evil"] = _ContractViolator._Sentinel()
+            adata.uns["evil"] = _Formatter._Sentinel()
             html = adata._repr_html_()
             assert html is not None
             return html
         finally:
             formatter_registry.unregister_type_formatter(formatter)
 
-    def test_bare_str_preview_markup_is_escaped(self) -> None:
-        html = self._register_and_render(field="preview_markup")
-        assert self.ATTACK not in html, (
-            "bare str preview_markup leaked raw — autoescape failed"
+    @pytest.mark.parametrize("field", ["preview_html", "type_html", "expanded_html"])
+    def test_bare_str_html_field_is_trusted(self, field: str) -> None:
+        """A plain ``str`` in a ``*_html`` field is inserted verbatim (contract)."""
+        html = self._register_and_render(**{field: self.ATTACK})
+        assert self.ATTACK in html
+
+    @pytest.mark.parametrize("field", ["preview", "tooltip"])
+    def test_plain_text_fields_are_escaped(self, field: str) -> None:
+        html = self._register_and_render(**{field: self.ATTACK})
+        assert self.ATTACK not in html
+        assert self.ESCAPED in html
+
+    def test_markup_format_escapes_values(self) -> None:
+        from markupsafe import Markup
+
+        html = self._register_and_render(
+            preview_html=Markup("<b>{}</b>").format(self.ATTACK)
         )
-        assert self.ESCAPED in html
-
-    def test_bare_str_type_markup_is_escaped(self) -> None:
-        html = self._register_and_render(field="type_markup")
         assert self.ATTACK not in html
-        assert self.ESCAPED in html
-
-    def test_bare_str_expanded_markup_is_escaped(self) -> None:
-        html = self._register_and_render(field="expanded_markup")
-        assert self.ATTACK not in html
-        assert self.ESCAPED in html
+        assert f"<b>{self.ESCAPED}</b>" in html
 
     def test_markup_wrapped_preview_passes_through(self) -> None:
         """Positive control: ``Markup`` input flows through autoescape verbatim."""
@@ -1603,7 +1603,7 @@ class TestMarkupAutoescapeContract:
             def format(self, obj, context):
                 return FormattedOutput(
                     type_name="trusted",
-                    preview_markup=Markup(safe_html),
+                    preview_html=Markup(safe_html),
                 )
 
             class _Sentinel:

@@ -344,13 +344,13 @@ class DataFrameFormatter(TypeFormatter[pd.DataFrame | Dataset2D]):
         n_rows, n_cols = df.shape
         cols = df.columns
 
-        # Build preview_markup with column list for obsm/varm sections
+        # Build preview_html with column list for obsm/varm sections
         # Uses anndata-columns class for CSS truncation and JS wrap button
-        preview_markup: Markup | None = None
+        preview_html: Markup | None = None
         if n_cols > 0 and context.section in ("obsm", "varm"):
             shown = cols[:DF_COLUMNS_PREVIEW_LIMIT]
             n_hidden = n_cols - len(shown)
-            preview_markup = get_macros().columns_preview(
+            preview_html = get_macros().columns_preview(
                 [str(c) for c in shown],
                 format_number(n_hidden) if n_hidden > 0 else None,
             )
@@ -358,7 +358,7 @@ class DataFrameFormatter(TypeFormatter[pd.DataFrame | Dataset2D]):
         # Check if expandable _repr_html_ is enabled
         expand_dataframes = settings.repr_html_dataframe_expand
 
-        expanded_markup: Markup | None = None
+        expanded_html: Markup | None = None
         if (
             expand_dataframes
             and isinstance(df, pd.DataFrame)  # never load a lazy Dataset2D
@@ -370,8 +370,8 @@ class DataFrameFormatter(TypeFormatter[pd.DataFrame | Dataset2D]):
             # Intentional broad catch: _repr_html_() can fail in many ways
             # (memory, recursion, custom dtypes, etc.) - gracefully degrade
             with contextlib.suppress(Exception):
-                # pandas escapes cell contents itself; trusted as ``Markup``
-                expanded_markup = Markup(df._repr_html_())  # type: ignore[operator]
+                # pandas escapes cell contents itself, so its HTML is trusted
+                expanded_html = Markup(df._repr_html_())  # type: ignore[operator]  # noqa: S704
 
         shape_str = f"{format_number(n_rows)} × {format_number(n_cols)}"
         return FormattedOutput(
@@ -379,8 +379,8 @@ class DataFrameFormatter(TypeFormatter[pd.DataFrame | Dataset2D]):
             if is_lazy
             else f"DataFrame ({shape_str})",
             css_class=CSS_DTYPE_DATAFRAME,
-            expanded_markup=expanded_markup,
-            preview_markup=preview_markup,
+            expanded_html=expanded_html,
+            preview_html=preview_html,
             is_serializable=True,
         )
 
@@ -510,8 +510,8 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
                 limit=0 if metadata_only else context.max_categories,
             )
 
-        # Build preview_markup with category list and colors
-        preview_markup: Markup | None = None
+        # Build preview_html with category list and colors
+        preview_html: Markup | None = None
         error = None
         if context.section in ("obs", "var") and context.key is not None:
             try:
@@ -523,16 +523,16 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
                 if len(categories) == 0:
                     # Metadata-only mode or no categories: show just count
                     if n_total is not None:
-                        preview_markup = render_muted_span(f"({n_total} categories)")
+                        preview_html = render_muted_span(f"({n_total} categories)")
                     else:
-                        preview_markup = render_muted_span("(categories)")
+                        preview_html = render_muted_span("(categories)")
                 else:
                     n_hidden = (
                         (n_total - len(categories))
                         if (n_total and was_truncated)
                         else 0
                     )
-                    preview_markup = render_category_list(
+                    preview_html = render_category_list(
                         categories,
                         colors.head if colors is not None else None,
                         context.max_categories,
@@ -562,7 +562,7 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
         return FormattedOutput(
             type_name=type_name,
             css_class=CSS_DTYPE_CATEGORY,
-            preview_markup=preview_markup,
+            preview_html=preview_html,
             is_serializable=True,
             warnings=warnings,
             error=error,
@@ -824,7 +824,7 @@ class AnnDataFormatter(TypeFormatter[AnnData]):
         shape_str = f"{format_number(obj.n_obs)} × {format_number(obj.n_vars)}"
 
         # Generate expanded HTML if within depth limit
-        expanded_markup: Markup | None = None
+        expanded_html: Markup | None = None
         if context.depth < context.max_depth - 1:
             # Lazy import to avoid circular dependency
             from .html import generate_repr_html
@@ -840,13 +840,13 @@ class AnnDataFormatter(TypeFormatter[AnnData]):
                 show_header=True,
                 show_search=False,
             )
-            expanded_markup = get_macros().nested_anndata_wrapper(nested_html)
+            expanded_html = get_macros().nested_anndata_wrapper(nested_html)
 
         return FormattedOutput(
             type_name=f"{type(obj).__name__} ({shape_str})",
             css_class=CSS_DTYPE_ANNDATA,
             tooltip="Nested AnnData object",
-            expanded_markup=expanded_markup,
+            expanded_html=expanded_html,
             is_serializable=True,
         )
 
@@ -1011,7 +1011,7 @@ class ColorListFormatter(TypeFormatter[object]):
                 swatches.append(get_macros().color_swatch("", label, valid=False))
         overflow = max(0, n_colors - COLOR_PREVIEW_LIMIT)
 
-        preview_markup = get_macros().color_preview(swatches, overflow)
+        preview_html = get_macros().color_preview(swatches, overflow)
 
         # Build warnings list (only for colors within preview limit)
         warnings = []
@@ -1024,7 +1024,7 @@ class ColorListFormatter(TypeFormatter[object]):
         return FormattedOutput(
             type_name=f"colors ({n_colors})",
             css_class=CSS_DTYPE_OBJECT,
-            preview_markup=preview_markup,
+            preview_html=preview_html,
             is_serializable=True,
             warnings=warnings,
         )
