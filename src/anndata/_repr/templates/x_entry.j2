@@ -1,0 +1,24 @@
+{# Renders the <div class="anndata-x__entry"> row.
+
+   Inputs:
+   - x_label (str): the label to show in the name cell (always "X").
+   - state (str): one of "ok", "none", "attribute_error", "format_error".
+   - type_name (str): type label (only used for state="ok"). Autoescaped.
+   - css_class (str): CSS dtype class (only used for state="ok").
+   - error_msg (str): short error string (used for state="attribute_error"
+     and state="format_error"). Autoescaped.
+
+   Trust contract: all inputs are plain str; Jinja autoescapes them. #}
+{% from '_macros.j2' import parenthesized_error %}
+<div class="anndata-x__entry">
+<span>{{ x_label }}</span>
+{%- if state == "ok" -%}
+<span class="{{ css_class }}" title="{{ type_name }}">{{ type_name }}</span>
+{%- elif state == "none" -%}
+<span><em>None</em></span>
+{%- elif state == "attribute_error" -%}
+{{ parenthesized_error(error_msg, CSS_TEXT_ERROR) }}
+{%- else -%}
+{{ parenthesized_error(error_msg, CSS_TEXT_MUTED) }}
+{%- endif -%}
+</div>

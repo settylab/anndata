@@ -9,9 +9,17 @@ This module provides a registry system that allows:
 
 Usage for extending to new types:
 
+    from markupsafe import Markup
+
     from anndata._repr import register_formatter, TypeFormatter, FormattedOutput
 
-    # Format by Python type (e.g., custom array in obsm)
+    # Format by Python type (e.g., custom array in obsm).
+    # Three ways to populate the preview column:
+    #   - preview=<str>                                 — plain text, autoescaped
+    #   - preview_html=Markup('<tag>{}</tag>').format(value) — custom HTML
+    #   - preview_html=obj._repr_html_()              — reuse trusted HTML
+    #     (a plain ``str`` in a ``*_html`` field is trusted, so escape what you
+    #     interpolate: ``escape_html(value)`` or ``Markup.format``)
     @register_formatter
     class MyArrayFormatter(TypeFormatter):
         def can_format(self, obj, context):
@@ -21,11 +29,12 @@ Usage for extending to new types:
             return FormattedOutput(
                 type_name=f"MyArray {obj.shape}",
                 css_class="anndata-dtype--myarray",
-                # preview_html for rightmost column (data preview, counts, etc.)
-                preview_html=f'<span class="anndata-text--muted">({obj.n_items} items)</span>',
+                preview_html=Markup(
+                    '<span class="mypackage-summary">{} items</span>'
+                ).format(obj.n_items),
             )
 
-    # Format by embedded type hint (e.g., tagged data in uns)
+    # Format by embedded type hint (e.g., tagged data in uns).
     from anndata._repr import extract_uns_type_hint
 
     @register_formatter
@@ -40,8 +49,18 @@ Usage for extending to new types:
             hint, data = extract_uns_type_hint(obj)
             return FormattedOutput(
                 type_name="config",
-                preview_html='<span>Custom config preview</span>',
+                preview_html=Markup(
+                    '<span class="anndata-text--muted">{}</span>'
+                ).format(data.get("name", "(unnamed)")),
             )
+
+Plain ``str`` values in ``*_html`` fields are trusted. Never interpolate
+unescaped user data into them, and never build HTML via
+``Markup(f'...{value}...')`` — the f-string interpolates ``value`` before
+``Markup`` sees it, bypassing autoescape. Use
+``Markup('<tag>{}</tag>').format(value)`` instead (standard MarkupSafe idiom),
+or invoke a macro via ``get_macros()`` which also scrubs NUL bytes via the
+template engine's finalize hook.
 """
 
 from __future__ import annotations
@@ -51,14 +70,17 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, overload
 
+from .environment import get_macros
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import TypeGuard
 
+    from markupsafe import Markup
+
 from .._repr_constants import (
     CSS_DTYPE_EXTENSION,
     CSS_DTYPE_UNKNOWN,
-    CSS_TEXT_WARNING,
     DEFAULT_FOLD_THRESHOLD,
     DEFAULT_MAX_CATEGORIES,
     DEFAULT_MAX_DEPTH,
@@ -67,7 +89,7 @@ from .._repr_constants import (
     DEFAULT_MAX_STRING_LENGTH,
     DEFAULT_UNIQUE_LIMIT,
 )
-from .utils import escape_html, is_serializable, validate_key
+from .utils import is_serializable, validate_key
 
 
 @dataclass
@@ -85,7 +107,7 @@ class FormattedOutput:
                                │ (if expanded_html provided and clicked)
                                ▼
                   ┌─────────────────────────────────────────────────┐
-                  │ expanded_html content (collapsible row)         │
+                  │ expanded_html content (collapsible row)       │
                   └─────────────────────────────────────────────────┘
 
     Field precedence rules
@@ -99,13 +121,18 @@ class FormattedOutput:
 
     **Preview column** (``error`` vs ``preview_html`` vs ``preview``):
         - If ``error`` is set, it is shown (auto-escaped) and previews are ignored
-        - Otherwise, if ``preview_html`` is provided, it is used (raw HTML)
+        - Otherwise, if ``preview_html`` is provided, it is used (trusted HTML)
         - Otherwise, ``preview`` is used as plain text (auto-escaped)
 
     Field naming convention
     -----------------------
-    - ``*_html`` fields contain raw HTML (caller responsible for escaping)
-    - Other string fields are plain text (auto-escaped when rendered)
+    - ``*_html`` fields carry trusted HTML, as ``str`` or ``markupsafe.Markup``.
+      A plain ``str`` is trusted verbatim (wrapped in ``Markup`` at a single
+      boundary, ``environment.as_markup``), so the producer must escape any
+      user data it interpolates: ``escape_html(value)`` or
+      ``Markup('<tag>{}</tag>').format(value)``, which escapes automatically.
+    - Plain string fields (``type_name``, ``preview``, ``tooltip``, etc.)
+      are autoescaped when rendered.
 
     Available CSS classes
     ---------------------
@@ -130,9 +157,10 @@ class FormattedOutput:
     Always used for data-dtype attribute (search/filter). Auto-escaped.
     Defaults to 'unknown' for resilience when type extraction fails."""
 
-    type_html: str | None = None
-    """Optional. Raw HTML to render in type column instead of type_name.
-    If provided, replaces the visual rendering but type_name still used for data-dtype."""
+    type_html: str | Markup | None = None
+    """Optional. Trusted HTML (``str`` or ``markupsafe.Markup``) to render in the type
+    column instead of ``type_name``. If provided, replaces the visual
+    rendering but ``type_name`` is still used for the ``data-dtype`` attribute."""
 
     css_class: str = CSS_DTYPE_UNKNOWN
     """CSS class for styling the type column."""
@@ -147,13 +175,15 @@ class FormattedOutput:
     """Optional. Plain text for preview column (rightmost). Auto-escaped.
     Ignored if preview_html is provided."""
 
-    preview_html: str | None = None
-    """Optional. Raw HTML for preview column (e.g., category pills with colors).
-    Takes precedence over preview if both are provided."""
+    preview_html: str | Markup | None = None
+    """Optional. Trusted HTML (``str`` or ``markupsafe.Markup``) for the preview column
+    (e.g., category pills with colors). Takes precedence over ``preview`` if
+    both are provided."""
 
-    expanded_html: str | None = None
-    """Optional. Raw HTML for expandable content shown in collapsible row below.
-    If provided, an 'Expand ▼' button is added to the type column."""
+    expanded_html: str | Markup | None = None
+    """Optional. Trusted HTML (``str`` or ``markupsafe.Markup``) for expandable content
+    shown in the collapsible row below. If provided, an 'Expand ▼' button is
+    added to the type column."""
 
     is_serializable: bool = True
     """Whether this type can be serialized to H5AD/Zarr."""
@@ -562,10 +592,7 @@ class FallbackFormatter(TypeFormatter[object]):
         preview_html = None
         if error is None and not is_extension:
             warnings.append(f"Unknown type: {full_name}")
-            preview_html = (
-                f'<span class="{CSS_TEXT_WARNING}">'
-                f"{escape_html(f'Unknown type: {full_name}')}</span>"
-            )
+            preview_html = get_macros().warning_preview(f"Unknown type: {full_name}")
 
         return FormattedOutput(
             type_name=type_name,
@@ -891,6 +918,8 @@ def extract_uns_type_hint(value: object) -> tuple[str | None, object]:
 
     1. In your package (e.g., mypackage/__init__.py), register a TypeFormatter::
 
+        from markupsafe import Markup
+
         from anndata._repr import (
             register_formatter,
             TypeFormatter,
@@ -910,10 +939,12 @@ def extract_uns_type_hint(value: object) -> tuple[str | None, object]:
 
             def format(self, obj, context):
                 hint, data = extract_uns_type_hint(obj)
-                # Render your custom visualization
                 return FormattedOutput(
                     type_name="mytype",
-                    preview_html="<span>Custom rendering</span>",
+                    # ``Markup.format`` autoescapes each non-``Markup`` arg.
+                    preview_html=Markup(
+                        '<span class="mypackage-badge">{}</span>'
+                    ).format(data.get("label", "untitled")),
                 )
 
     2. When the user imports your package, the formatter is registered

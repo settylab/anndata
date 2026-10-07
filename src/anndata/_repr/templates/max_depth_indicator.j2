@@ -1,0 +1,7 @@
+{# Single-line depth-limit placeholder shown when recursion hits max_depth.
+
+   Inputs:
+   - n_obs_str (str): pre-formatted obs count (via format_number, falls back to "?").
+   - n_vars_str (str): pre-formatted var count.
+#}
+<div class="anndata-depth-limit">AnnData ({{ n_obs_str }} × {{ n_vars_str }}) - max depth reached</div>

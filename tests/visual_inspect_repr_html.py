@@ -1181,12 +1181,16 @@ class _HasReprHtml(Protocol):
 
 
 def render(obj: _HasReprHtml) -> str:
-    """Return ``obj._repr_html_()``, failing loudly if it returned ``None``."""
+    """Return ``obj._repr_html_()`` as plain ``str``, failing loudly if it returned ``None``.
+
+    The repr is ``Markup``; this page composes raw HTML chrome around it with
+    plain ``str`` operations, which ``Markup`` would escape.
+    """
     out = obj._repr_html_()
     if out is None:
         msg = f"{type(obj).__name__}._repr_html_() returned None"
         raise RuntimeError(msg)
-    return out
+    return str(out)
 
 
 def strip_script_tags(html: str) -> str:

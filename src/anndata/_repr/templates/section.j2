@@ -1,0 +1,16 @@
+{# Foldable section frame: <details> with a <summary> header and a content body.
+   `name`, `section_id`, `tooltip` and `doc_url` are plain str and autoescaped.
+   `count` is str (escaped) or Markup (verbatim), e.g. "(3 items)" or "(empty)".
+   `content` is Markup (pre-rendered body). `extra_classes` is an optional str
+   of additional CSS classes (e.g. "anndata-sec-unknown") on the root element.
+#}
+<details class="anndata-section{% if extra_classes %} {{ extra_classes }}{% endif %}" data-section="{{ section_id }}"{% if is_open %} open{% endif %}>
+  <summary>
+    <span class="anndata-section__name">{{ name }}</span>
+    <span class="anndata-section__count">{{ count }}</span>
+    {%- if doc_url %}
+    <a class="anndata-section__help" href="{{ doc_url }}" target="_blank" title="{{ tooltip }}">?</a>
+    {%- endif %}
+  </summary>
+  <div class="anndata-section__content">{{ content }}</div>
+</details>

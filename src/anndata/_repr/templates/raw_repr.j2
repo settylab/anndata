@@ -1,0 +1,24 @@
+{# Inner HTML body for a Raw object (rendered when a Raw row is expanded).
+
+   Inputs:
+   - container_id (str): unique id for the outer <div>. Autoescaped.
+   - shape_str (str): "N obs × M var". Autoescaped.
+   - index_preview (Markup): obs_names / var_names block from
+     render_index_preview.
+   - sections (list[Markup]): pre-rendered X / var / varm sections (or error
+     placeholders), emitted in order. Trusted HTML.
+
+   Role: produce the `<div class="anndata-repr">…</div>` body used as the
+   nested content of the Raw row. This intentionally mirrors anndata.j2's
+   shape but drops sections a Raw doesn't have (obs, obsm, layers, ...).
+#}
+<div class="anndata-repr" id="{{ container_id }}">
+  <div class="anndata-header">
+    <span class="anndata-header__type">Raw</span>
+    <span class="anndata-header__shape">{{ shape_str }}</span>
+  </div>
+  {{ index_preview }}
+  {%- for section in sections %}
+  {{ section }}
+  {%- endfor %}
+</div>

@@ -1,0 +1,25 @@
+{# AnnData header block.
+
+   Inputs:
+   - type_name (str): class name like "AnnData".
+   - shape_str (str): e.g. "10 obs × 5 vars"; pre-formatted, autoescaped.
+   - extras (list[Markup]): pre-rendered badges, filepath spans, readme icon —
+     emitted in the order Python built them (badges and filepath spans are
+     interleaved, so a flat ordered list keeps output identical to the
+     pre-template code path).
+   - search_box (Markup | None): pre-rendered search box (from render_search_box);
+     when present, a spacer span is emitted before it.
+
+   Role: assemble `<div class="anndata-header">…</div>`.
+#}
+<div class="anndata-header">
+  <span class="anndata-header__type">{{ type_name }}</span>
+  <span class="anndata-header__shape">{{ shape_str }}</span>
+  {%- for extra in extras %}
+  {{ extra }}
+  {%- endfor %}
+  {%- if search_box is not none %}
+  <span class="anndata-spacer"></span>
+  {{ search_box }}
+  {%- endif %}
+</div>

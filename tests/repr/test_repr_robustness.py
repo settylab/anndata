@@ -1509,10 +1509,167 @@ Emoji: 💀💀💀💀💀
 """
 
         html = adata._repr_html_()
+        assert html is not None
         v = validate_html(html)
 
         v.assert_html_well_formed()
         v.assert_element_exists(".anndata-readme__icon")
+        assert "\x00" not in html, "NUL leaked into rendered HTML"
+
+
+class TestHtmlTrustBoundary:
+    """Verify the ``*_html`` trust boundary and autoescape of plain-text fields.
+
+    ``FormattedOutput.{type_html, preview_html, expanded_html}`` are typed
+    ``str | Markup``. A plain ``str`` there is trusted verbatim (wrapped in
+    ``Markup`` at the single ``as_markup`` boundary), as in the f-string
+    implementation; the plain-text fields are always autoescaped by the
+    templates, and ``Markup.format`` escapes interpolated values.
+    """
+
+    ATTACK = '<script>alert("xss")</script>'
+    ESCAPED = "&lt;script&gt;alert(&#34;xss&#34;)&lt;/script&gt;"
+
+    def _register_and_render(self, **fields: object) -> str:
+        """Register a one-off TypeFormatter that sets ``fields`` and render."""
+        from anndata._repr.registry import (
+            FormattedOutput,
+            TypeFormatter,
+            register_formatter,
+        )
+
+        class _Formatter(TypeFormatter):
+            priority = 10000  # beat every built-in formatter
+
+            def can_format(self, obj, context):
+                return isinstance(obj, _Formatter._Sentinel)
+
+            def format(self, obj, context):
+                return FormattedOutput(type_name="violator", **fields)
+
+            class _Sentinel:
+                pass
+
+        formatter = _Formatter()
+        register_formatter(formatter)
+        try:
+            adata = AnnData(np.zeros((2, 2)))
+            adata.uns["evil"] = _Formatter._Sentinel()
+            html = adata._repr_html_()
+            assert html is not None
+            return html
+        finally:
+            formatter_registry.unregister_type_formatter(formatter)
+
+    @pytest.mark.parametrize("field", ["preview_html", "type_html", "expanded_html"])
+    def test_bare_str_html_field_is_trusted(self, field: str) -> None:
+        """A plain ``str`` in a ``*_html`` field is inserted verbatim (contract)."""
+        html = self._register_and_render(**{field: self.ATTACK})
+        assert self.ATTACK in html
+
+    @pytest.mark.parametrize("field", ["preview", "tooltip"])
+    def test_plain_text_fields_are_escaped(self, field: str) -> None:
+        html = self._register_and_render(**{field: self.ATTACK})
+        assert self.ATTACK not in html
+        assert self.ESCAPED in html
+
+    def test_markup_format_escapes_values(self) -> None:
+        from markupsafe import Markup
+
+        html = self._register_and_render(
+            preview_html=Markup("<b>{}</b>").format(self.ATTACK)
+        )
+        assert self.ATTACK not in html
+        assert f"<b>{self.ESCAPED}</b>" in html
+
+    def test_markup_wrapped_preview_passes_through(self) -> None:
+        """Positive control: ``Markup`` input flows through autoescape verbatim."""
+        from markupsafe import Markup
+
+        from anndata._repr.registry import (
+            FormattedOutput,
+            TypeFormatter,
+            register_formatter,
+        )
+
+        safe_html = '<span class="trusted-preview">hello</span>'
+
+        class _TrustedFormatter(TypeFormatter):
+            priority = 10000
+
+            def can_format(self, obj, context):
+                return isinstance(obj, _TrustedFormatter._Sentinel)
+
+            def format(self, obj, context):
+                return FormattedOutput(
+                    type_name="trusted",
+                    preview_html=Markup(safe_html),
+                )
+
+            class _Sentinel:
+                pass
+
+        formatter = _TrustedFormatter()
+        register_formatter(formatter)
+        try:
+            adata = AnnData(np.zeros((2, 2)))
+            adata.uns["ok"] = _TrustedFormatter._Sentinel()
+            html = adata._repr_html_()
+            assert html is not None
+            assert safe_html in html, (
+                "Markup-wrapped preview did not pass through verbatim"
+            )
+        finally:
+            formatter_registry.unregister_type_formatter(formatter)
+
+    def test_section_formatter_render_html_is_trusted(self) -> None:
+        """Document the ecosystem-extension contract: ``SectionFormatter.render_html``
+        output is trusted verbatim.
+
+        ``_render_custom_section`` wraps ``render_html`` return values in
+        ``Markup(...)`` — that is a trust assertion, not a sanitizer. An
+        extension author who returns a bare ``str`` with embedded HTML is
+        responsible for the contents being safe. This test pins the current
+        behavior so any future shift to autoescape is an explicit decision.
+        """
+        from anndata._repr.registry import (
+            FormattedEntry,
+            FormattedOutput,
+            SectionFormatter,
+            formatter_registry,
+        )
+
+        raw_html = '<div class="custom">trusted <b>raw</b> html</div>'
+
+        class _TrustedSection(SectionFormatter):
+            @property
+            def section_name(self) -> str:
+                return "_trusted_section"
+
+            def should_show(self, obj):
+                return True
+
+            def get_entries(self, obj, context):
+                return [
+                    FormattedEntry(key="ignored", output=FormattedOutput(type_name="x"))
+                ]
+
+            def render_html(self, obj, context):
+                # Bare str — anndata trusts this verbatim per the extension contract.
+                return raw_html
+
+        formatter = _TrustedSection()
+        formatter_registry.register_section_formatter(formatter)
+        try:
+            adata = AnnData(np.zeros((2, 2)))
+            html = adata._repr_html_()
+            assert html is not None
+            assert raw_html in html, (
+                "render_html(str) must be passed through unmodified — "
+                "trust boundary is the SectionFormatter contract"
+            )
+        finally:
+            formatter_registry.unregister_section_formatter(formatter.section_name)
 
 
 class TestFailuresAreVisible:

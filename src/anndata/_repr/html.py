@@ -11,17 +11,28 @@ This module generates the complete HTML representation by:
 
 from __future__ import annotations
 
+import contextlib
+import re
 import uuid
 from typing import TYPE_CHECKING
 
+from markupsafe import Markup
+
 from .._core.anndata import AnnData
 from .._repr_constants import (
+    CHAR_WIDTH_PX,
+    COPY_BUTTON_PADDING_PX,
     CSS_BADGE_EXTENSION,
+    DEFAULT_FIELD_WIDTH_PX,
+    MIN_FIELD_WIDTH_PX,
     TOOLTIP_TRUNCATE_LENGTH,
 )
 from .._settings import settings
 from .._types import AnnDataElem
 from ..utils import get_literal_members
+from . import (
+    formatters as _formatters,  # noqa: F401  # side-effect: register built-in formatters
+)
 from .components import (
     render_badge,
     render_header_badges,
@@ -36,6 +47,7 @@ from .core import (
     render_x_entry,
 )
 from .css import get_css
+from .environment import as_markup, get_macros, render_template
 from .javascript import get_javascript
 from .lazy import get_lazy_backing_info, is_lazy_adata
 from .registry import (
@@ -51,7 +63,6 @@ from .sections import (
     _render_uns_section,
 )
 from .utils import (
-    escape_html,
     format_memory_size,
     format_number,
     get_anndata_version,
@@ -63,14 +74,11 @@ from .utils import (
 if TYPE_CHECKING:
     from .registry import SectionFormatter
 
-# Import formatters to register them (side-effect import)
-from .._repr_constants import (
-    CHAR_WIDTH_PX,
-    COPY_BUTTON_PADDING_PX,
-    DEFAULT_FIELD_WIDTH_PX,
-    MIN_FIELD_WIDTH_PX,
-)
-from . import formatters as _formatters  # noqa: F401
+
+# container_id is interpolated verbatim into a <script> block
+# (see javascript.py: `getElementById('{container_id}')`), so any
+# caller-supplied value must match this restrictive shape.
+_CONTAINER_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 # Display order of the standard sections: the main matrix first, then the
 # annotations in the order of :data:`AnnDataElem`.
@@ -182,7 +190,7 @@ def generate_repr_html(  # noqa: PLR0913
     show_header: bool = True,
     show_search: bool = True,
     _container_id: str | None = None,
-) -> str:
+) -> Markup:
     """
     Generate HTML representation for an AnnData object.
 
@@ -214,7 +222,7 @@ def generate_repr_html(  # noqa: PLR0913
     """
     # Check if HTML repr is enabled
     if not settings.repr_html_enabled:
-        return f"<pre>{escape_html(repr(adata))}</pre>"
+        return get_macros().pre_fallback(repr(adata))
 
     # Create formatter context (resolves settings)
     context = _create_formatter_context(
@@ -230,83 +238,76 @@ def generate_repr_html(  # noqa: PLR0913
     if depth >= context.max_depth:
         return _render_max_depth_indicator(adata)
 
-    # Generate unique container ID
-    container_id = _container_id or f"anndata-repr-{uuid.uuid4().hex[:8]}"
-
-    # Build HTML parts
-    parts = []
-
-    # CSS and JS only at top level
-    if depth == 0:
-        parts.append(get_css())
+    # Generate unique container ID. container_id is interpolated verbatim into
+    # a <script> block (see javascript.py), so caller-supplied values must match
+    # a restrictive pattern to prevent JS injection. Auto-generated UUIDs are
+    # safe by construction and skip the check.
+    if _container_id is not None:
+        if not _CONTAINER_ID_RE.match(_container_id):
+            msg = (
+                f"_container_id must match {_CONTAINER_ID_RE.pattern!r}; "
+                f"got {_container_id!r}"
+            )
+            raise ValueError(msg)
+        container_id = _container_id
+    else:
+        container_id = f"anndata-repr-{uuid.uuid4().hex[:8]}"
 
     # Calculate field name column width based on content
     field_width = _calculate_field_name_width(adata, settings.repr_html_max_field_width)
     type_width = settings.repr_html_type_width
 
-    # Container with computed column widths as CSS variables.
-    # Inline font-family:monospace provides readable fallback when CSS is stripped
-    # (GitHub, untrusted notebooks). CSS overrides with its own font stack.
-    # Inline min-width on cells + CSS custom properties give column alignment
-    # even without a stylesheet.
-    style = f"font-family: monospace; --anndata-name-col-width: {field_width}px; --anndata-type-col-width: {type_width}px;"
-    parts.append(
-        f'<div class="anndata-repr" id="{container_id}" data-depth="{depth}" style="{style}">'
+    # Computed column widths as CSS variables. Inline font-family:monospace
+    # provides a readable fallback when CSS is stripped (GitHub, untrusted
+    # notebooks).
+    style = (
+        f"font-family: monospace; "
+        f"--anndata-name-col-width: {field_width}px; "
+        f"--anndata-type-col-width: {type_width}px;"
     )
 
-    # Header (with search box integrated on the right)
+    header_html: Markup | None = None
     if show_header:
-        parts.append(
-            _render_header(
-                adata, show_search=show_search and depth == 0, container_id=container_id
-            )
+        header_html = _render_header(
+            adata,
+            show_search=show_search and depth == 0,
+            container_id=container_id,
         )
 
-    # Index preview (only at top level)
+    index_preview_markup: Markup | None = None
+    footer_html: Markup | None = None
+    hints_html: Markup | None = None
+    css_html: Markup | None = None
+    javascript_html: Markup | None = None
     if depth == 0:
-        parts.append(render_index_preview(adata))
+        index_preview_markup = render_index_preview(adata)
+        footer_html = _render_footer(adata)
+        hints_html = _render_hints()
+        # Packaged static assets; ``container_id`` is validated above
+        css_html = Markup(get_css())  # noqa: S704
+        javascript_html = Markup(get_javascript(container_id))  # noqa: S704
 
-    # Sections container
-    parts.append('<div class="anndata-repr__sections">')
-    parts.extend(_render_all_sections(adata, context))
-    parts.append("</div>")  # anndata-repr__sections
-
-    # Footer with metadata (only at top level)
-    if depth == 0:
-        parts.append(_render_footer(adata))
-        # Degradation hints: visible only when CSS or JS is missing.
-        # No-CSS hint: visible by default, hidden by CSS.
-        parts.append(
-            '<div class="anndata-repr__hint-nocss">'
-            "<em>Styled representation available in Jupyter and trusted notebooks "
-            "(colors, search, type highlighting).</em>"
-            "</div>"
-        )
-        # No-JS hint: hidden by default (no-CSS case already has its own hint),
-        # shown by CSS (for static HTML with styles but no JS),
-        # hidden again by JS on init.
-        parts.append(
-            '<div class="anndata-repr__hint-nojs" style="display:none">'
-            "<em>Interactive features (search, copy, category wrapping) "
-            "require JavaScript. Trust this notebook to enable them.</em>"
-            "</div>"
-        )
-
-    parts.append("</div>")  # anndata-repr
-
-    # JavaScript (only at top level)
-    if depth == 0:
-        parts.append(get_javascript(container_id))
-
-    return "\n".join(parts)
+    return render_template(
+        "anndata.j2",
+        container_id=container_id,
+        depth=depth,
+        style=style,
+        css=css_html,
+        header=header_html,
+        index_preview=index_preview_markup,
+        sections=_render_all_sections(adata, context),
+        footer=footer_html,
+        hints=hints_html,
+        javascript=javascript_html,
+    )
 
 
 def _render_all_sections(
     adata: AnnData,
     context: FormatterContext,
-) -> list[str]:
+) -> list[Markup]:
     """Render all standard and custom sections."""
-    parts: list[str] = []
+    parts: list[Markup] = []
     custom_sections_after = _get_custom_sections_by_position(adata)
 
     for section in _SECTION_ORDER:
@@ -338,7 +339,7 @@ def _render_section(
     adata: AnnData,
     section: str,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render a single standard section.
 
     Attribute access happens inside the try/except so a broken section (one
@@ -406,7 +407,7 @@ def _render_custom_section(
     adata: AnnData,
     formatter: SectionFormatter,
     context: FormatterContext,
-) -> str:
+) -> Markup:
     """Render a custom section using its registered formatter.
 
     If the formatter defines ``render_html(obj, context)``, it is tried
@@ -414,10 +415,9 @@ def _render_custom_section(
     If ``render_html`` fails, falls back to the standard ``get_entries``
     path so formatters can provide both an enhanced and a safe representation.
     """
-    # Allow formatters to produce raw HTML (e.g., compact inline rows)
     if hasattr(formatter, "render_html"):
         try:
-            return formatter.render_html(adata, context)
+            return as_markup(formatter.render_html(adata, context))
         except Exception as e:  # noqa: BLE001
             from .._warnings import warn
 
@@ -426,7 +426,6 @@ def _render_custom_section(
                 f"falling back to get_entries: {e}",
                 UserWarning,
             )
-            # Fall through to get_entries below
 
     try:
         entries = formatter.get_entries(adata, context)
@@ -442,7 +441,7 @@ def _render_custom_section(
         return render_error_section(formatter.section_name, f"{type(e).__name__}: {e}")
 
     if not entries:
-        return ""
+        return Markup("")
 
     n_items = len(entries)
     section_name = formatter.section_name
@@ -455,10 +454,9 @@ def _render_custom_section(
             break
         rows.append(render_formatted_entry(entry, section_name))
 
-    # Use render_section for consistent structure
     return render_section(
         getattr(formatter, "display_name", section_name),
-        "\n".join(rows),
+        Markup("\n").join(rows),
         n_items=n_items,
         doc_url=getattr(formatter, "doc_url", None),
         tooltip=getattr(formatter, "tooltip", ""),
@@ -467,19 +465,46 @@ def _render_custom_section(
     )
 
 
+def _build_readme_icon(adata: AnnData) -> Markup | None:
+    """Build the README icon Markup from ``adata.uns['README']`` if present.
+
+    The truncation + tooltip shaping stays in Python; only the final Markup
+    fragment is handed off to the template.
+    """
+    readme_content = adata.uns.get("README") if hasattr(adata, "uns") else None
+    if not (isinstance(readme_content, str) and readme_content.strip()):
+        return None
+
+    max_readme_size = settings.repr_html_max_readme_size
+    original_len = len(readme_content)
+    if max_readme_size > 0 and original_len > max_readme_size:
+        readme_content = readme_content[:max_readme_size]
+        truncation_note = (
+            f"\n\n---\n*README truncated: showing {max_readme_size:,} of "
+            f"{original_len:,} characters*"
+        )
+        readme_content += truncation_note
+
+    tooltip_text = readme_content[:TOOLTIP_TRUNCATE_LENGTH]
+    if len(readme_content) > TOOLTIP_TRUNCATE_LENGTH:
+        tooltip_text += "..."
+
+    # Scrub NULs before the template: the previous ``.format(...)`` path only
+    # HTML-escaped, so NUL bytes flowed through into the ``data-readme``
+    # attribute. The macro autoescapes but doesn't scrub; Jinja's finalize
+    # hook scrubs too, but being explicit here keeps the contract obvious.
+    readme_content = readme_content.replace("\x00", "\ufffd")
+    tooltip_text = tooltip_text.replace("\x00", "\ufffd")
+
+    return get_macros().readme_icon(readme_content, tooltip_text)
+
+
 def _render_header(
     adata: AnnData, *, show_search: bool = False, container_id: str = ""
-) -> str:
+) -> Markup:
     """Render the header with type, shape, badges, and optional search box."""
-    parts = ['<div class="anndata-header">']
-
-    # Type name - allow for extension types
     type_name = type(adata).__name__
-    parts.append(f'<span class="anndata-header__type">{escape_html(type_name)}</span>')
-
-    # Shape
     shape_str = f"{format_number(adata.n_obs)} obs × {format_number(adata.n_vars)} vars"
-    parts.append(f'<span class="anndata-header__shape">{shape_str}</span>')
 
     # View / backed / lazy badges and backing file path
     backed = is_backed(adata)
@@ -495,7 +520,7 @@ def _render_header(
         lazy_info = get_lazy_backing_info(adata)
         backing_path = lazy_info.get("filename", "")
         backing_format = lazy_info.get("format", "")
-    parts.append(
+    extras: list[Markup] = [
         render_header_badges(
             is_view=is_view(adata),
             is_backed=backed,
@@ -504,13 +529,13 @@ def _render_header(
             backing_format=backing_format,
             is_open=is_open,
         )
-    )
+    ]
 
     # Mark AnnData subclasses (the type name itself is already shown above).
     # AnnData-like containers (e.g. MuData) only duck-type, so they get no badge.
     if type_name != "AnnData" and isinstance(adata, AnnData):
         cls = type(adata)
-        parts.append(
+        extras.append(
             render_badge(
                 "AnnData subclass",
                 CSS_BADGE_EXTENSION,
@@ -518,75 +543,55 @@ def _render_header(
             )
         )
 
-    # README icon if uns["README"] exists with a string
-    readme_content = adata.uns.get("README") if hasattr(adata, "uns") else None
-    if isinstance(readme_content, str) and readme_content.strip():
-        # Check max README size setting (0 means no limit)
-        max_readme_size = settings.repr_html_max_readme_size
-        original_len = len(readme_content)
-        if max_readme_size > 0 and original_len > max_readme_size:
-            # Truncate and add note
-            readme_content = readme_content[:max_readme_size]
-            truncation_note = (
-                f"\n\n---\n*README truncated: showing {max_readme_size:,} of "
-                f"{original_len:,} characters*"
-            )
-            readme_content += truncation_note
+    readme_icon = _build_readme_icon(adata)
+    if readme_icon is not None:
+        extras.append(readme_icon)
 
-        escaped_readme = escape_html(readme_content)
-        # Truncate for no-JS tooltip (first 500 chars)
-        tooltip_text = readme_content[:TOOLTIP_TRUNCATE_LENGTH]
-        if len(readme_content) > TOOLTIP_TRUNCATE_LENGTH:
-            tooltip_text += "..."
-        escaped_tooltip = escape_html(tooltip_text)
+    search_box = render_search_box(container_id) if show_search else None
 
-        parts.append(
-            f'<span class="anndata-readme__icon" '
-            f'data-readme="{escaped_readme}" '
-            f'title="{escaped_tooltip}" '
-            f'role="button" tabindex="0" aria-label="View README">'
-            f"ⓘ"
-            f"</span>"
-        )
-
-    # Search box on the right (spacer pushes it right) - use render_search_box() helper
-    if show_search:
-        parts.append('<span class="anndata-spacer"></span>')
-        parts.append(render_search_box(container_id))
-
-    parts.append("</div>")
-    return "\n".join(parts)
+    return render_template(
+        "header.j2",
+        type_name=type_name,
+        shape_str=shape_str,
+        extras=extras,
+        search_box=search_box,
+    )
 
 
-def _render_footer(adata: AnnData) -> str:
-    """Render the footer with version and memory info."""
-    parts = ['<div class="anndata-footer">']
+def _render_footer(adata: AnnData) -> Markup:
+    """Render the footer with version and memory info.
 
-    # Version
-    version = get_anndata_version()
-    parts.append(f"<span>anndata v{version}</span>")
-
-    # Memory usage. Omitted for lazy AnnData, where everything stays on disk and
-    # __sizeof__ would only count a few in-memory wrappers.
+    The memory estimate is omitted for lazy AnnData, where everything stays on
+    disk and ``__sizeof__`` would only count a few in-memory wrappers.
+    """
+    memory_str: str | None = None
+    memory_title = "Estimated memory usage"
     if not is_lazy_adata(adata):
-        try:
-            mem_str = format_memory_size(adata.__sizeof__())
-            title = (
-                "Estimated in-memory size (data on disk not included)"
-                if is_backed(adata)
-                else "Estimated memory usage"
-            )
-            parts.append(f'<span title="{title}">~{mem_str}</span>')
-        except Exception:  # noqa: BLE001
-            # Broad catch: __sizeof__ recursively calls into user data which could raise anything
-            pass
+        # __sizeof__ recurses into user data which can raise anything
+        with contextlib.suppress(Exception):
+            memory_str = format_memory_size(adata.__sizeof__())
+        if is_backed(adata):
+            memory_title = "Estimated in-memory size (data on disk not included)"
 
-    parts.append("</div>")
-    return "\n".join(parts)
+    return render_template(
+        "footer.j2",
+        version=get_anndata_version(),
+        memory_str=memory_str,
+        memory_title=memory_title,
+    )
 
 
-def _render_max_depth_indicator(adata: AnnData) -> str:
+def _render_hints() -> Markup:
+    """Render the static no-CSS / no-JS hint block."""
+    return render_template("hints.j2")
+
+
+def _render_max_depth_indicator(adata: AnnData) -> Markup:
     """Render indicator when max depth is reached."""
     n_obs = getattr(adata, "n_obs", "?")
     n_vars = getattr(adata, "n_vars", "?")
-    return f'<div class="anndata-depth-limit">AnnData ({format_number(n_obs)} × {format_number(n_vars)}) - max depth reached</div>'
+    return render_template(
+        "max_depth_indicator.j2",
+        n_obs_str=format_number(n_obs),
+        n_vars_str=format_number(n_vars),
+    )
