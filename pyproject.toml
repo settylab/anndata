@@ -41,6 +41,7 @@ dependencies = [
     "array-api-compat>=1.7.1",
     "h5py>=3.11",
     "legacy-api-wrap",
+    "markupsafe>=2.1",
     "natsort",
     "numpy>=2.1",
     "packaging>=24.2",
@@ -170,6 +171,7 @@ lint.select = [
     "PTH",  # Pathlib instead of os.path
     "PYI",  # Typing
     "RUF",  # Unused noqa
+    "S704", # `Markup(f"…")` / `Markup(non_literal)` bypass escaping: see `anndata._repr`
     "SIM",  # Code simplifications
     "TC",   # manage type checking blocks
     "TID",  # Banned imports
