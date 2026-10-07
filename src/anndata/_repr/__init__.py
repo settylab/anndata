@@ -12,8 +12,8 @@ When modifying imports, maintain this order:
     │   Constants only. Imported by _settings.py at anndata import time.
     │   Must not import anything from anndata.
     │
-    └─► utils.py (depends on: _settings, numpy, pandas)
-        │   HTML escaping, formatting, serialization checks.
+    └─► utils.py (depends on: _settings, numpy, pandas, markupsafe)
+        │   HTML escaping, trusted_html(), formatting, serialization checks.
         │
         └─► components.py (depends on: utils)
             │   UI building blocks: badges, buttons, icons.
@@ -53,6 +53,33 @@ This module provides an extensible HTML representation system with:
 - Support for nested AnnData objects
 - Graceful handling of unknown types
 
+HTML safety (``markupsafe``)
+----------------------------
+All HTML is built as :class:`markupsafe.Markup`. Text becomes HTML only
+through ``Markup("<span>{}</span>").format(text)`` (which escapes ``text``),
+``markupsafe.escape`` or :func:`~anndata._repr.utils.escape_html`, and
+fragments are combined with ``Markup("").join(...)``. Never build markup with
+``Markup(f"...")``: ruff rule ``S704`` is enabled for this package and flags it,
+as well as ``Markup(non_literal)``. The few places that do wrap a variable
+(``# noqa: S704``) are the trust boundaries: extension ``*_html`` fields
+(via :func:`~anndata._repr.utils.trusted_html`), pandas' own ``_repr_html_()``
+and the pre-built CSS and JavaScript.
+
+**Backward compatible**: a plain ``str`` in a ``FormattedOutput.*_html`` field
+or passed to a ``render_*`` helper is still trusted and emitted verbatim,
+as before. New code should prefer ``Markup`` (escapes dynamic parts) or the
+plain-text fields (``preview``, ``type_name``, ``tooltip``), which are always
+escaped.
+
+**Combining with plain strings**: the ``render_*`` helpers, ``get_css``,
+``get_javascript``, ``generate_repr_html`` and ``escape_html`` return
+:class:`~markupsafe.Markup`. ``Markup + str`` (in either order) escapes the plain
+``str``, so ``render_badge("x") + "<hr>"`` yields ``&lt;hr&gt;``. Use
+``Markup(...) + Markup(...)``, ``Markup("{}{}").format(a, b)``,
+``Markup("").join(parts)``, an f-string or ``"".join(parts)`` instead (the last
+two give a plain ``str``, which is trusted as before when passed back to
+anndata). ``AnnData._repr_html_()`` returns a plain ``str`` for this reason.
+
 Extensibility
 -------------
 The system is designed to be extensible via two registry patterns:
@@ -66,6 +93,8 @@ The system is designed to be extensible via two registry patterns:
         - ``sections``: Tuple of section names to restrict formatter to (default: None = all)
 
     Example - format by Python type::
+
+        from markupsafe import Markup
 
         from anndata._repr import register_formatter, TypeFormatter, FormattedOutput
 
@@ -81,8 +110,13 @@ The system is designed to be extensible via two registry patterns:
                 return FormattedOutput(
                     type_name=f"MyArray {obj.shape}",
                     css_class="anndata-dtype--myarray",
-                    # preview_html provides HTML for the preview column (rightmost)
-                    preview_html=f'<span class="anndata-text--muted">({obj.n_items} items)</span>',
+                    # preview_html provides HTML for the preview column (rightmost).
+                    # Markup.format escapes the interpolated values:
+                    preview_html=Markup(
+                        '<span class="anndata-text--muted">({} items)</span>'
+                    ).format(obj.n_items),
+                    # For plain text, `preview=...` is escaped automatically instead.
+                    # A plain-str preview_html still works but is emitted unescaped.
                 )
 
     **Error handling**: Formatters can signal errors in two ways:
@@ -99,6 +133,8 @@ The system is designed to be extensible via two registry patterns:
     When ``error`` is set, it takes precedence over ``preview`` and ``preview_html``.
 
     Example - format by embedded type hint (for tagged data in uns)::
+
+        from markupsafe import Markup
 
         from anndata._repr import register_formatter, TypeFormatter, FormattedOutput
         from anndata._repr import extract_uns_type_hint
@@ -117,7 +153,7 @@ The system is designed to be extensible via two registry patterns:
                 hint, data = extract_uns_type_hint(obj)
                 return FormattedOutput(
                     type_name="config",
-                    preview_html="<span>Custom config preview</span>",
+                    preview_html=Markup("<span>Custom config preview</span>"),
                 )
 
     Data structure for type hints (works in any section)::
@@ -177,14 +213,18 @@ their own ``_repr_html_``, you can reuse anndata's CSS, JavaScript, and helpers.
 
 **Basic structure**::
 
+    from markupsafe import Markup
+
     from anndata._repr import get_css, get_javascript
 
 
     class MyData:
         def _repr_html_(self):
             container_id = f"mydata-{id(self)}"
-            return f'''
-                {get_css()}
+            # get_css() and get_javascript() return Markup, so they are not escaped
+            return Markup(
+                '''
+                {css}
                 <div class="anndata-repr" id="{container_id}">
                     <div class="anndata-header">
                         <span class="anndata-header__type">MyData</span>
@@ -194,8 +234,13 @@ their own ``_repr_html_``, you can reuse anndata's CSS, JavaScript, and helpers.
                         <!-- sections go here -->
                     </div>
                 </div>
-                {get_javascript(container_id)}
+                {js}
             '''
+            ).format(
+                css=get_css(),
+                container_id=container_id,
+                js=get_javascript(container_id),
+            )
 
 **CSS classes** (stable, can be used directly):
 
@@ -230,6 +275,8 @@ their own ``_repr_html_``, you can reuse anndata's CSS, JavaScript, and helpers.
 
 **Using render helpers** for consistent section rendering::
 
+    from markupsafe import Markup
+
     from anndata._repr import (
         CSS_DTYPE_NDARRAY,
         get_css,
@@ -248,16 +295,25 @@ their own ``_repr_html_``, you can reuse anndata's CSS, JavaScript, and helpers.
         parts = [get_css()]
 
         # Header
-        parts.append(f'''
+        # render_* helpers return Markup, so they are composed without escaping
+        parts.append(
+            Markup(
+                '''
             <div class="anndata-repr" id="{container_id}">
             <div class="anndata-header">
                 <span class="anndata-header__type">MyData</span>
-                {render_badge("Zarr", "anndata-badge--backed")}
+                {badge}
                 <span style="flex-grow:1;"></span>
-                {render_search_box(container_id)}
+                {search}
             </div>
             <div class="anndata-repr__sections">
-        ''')
+        '''
+            ).format(
+                container_id=container_id,
+                badge=render_badge("Zarr", "anndata-badge--backed"),
+                search=render_search_box(container_id),
+            )
+        )
 
         # Build section entries
         entries = []
@@ -275,14 +331,14 @@ their own ``_repr_html_``, you can reuse anndata's CSS, JavaScript, and helpers.
         parts.append(
             render_section(
                 "items",
-                "\\n".join(entries),
+                Markup("\\n").join(entries),
                 n_items=len(self.items),
             )
         )
 
-        parts.append("</div></div>")
+        parts.append(Markup("</div></div>"))
         parts.append(get_javascript(container_id))
-        return "\\n".join(parts)
+        return Markup("\\n").join(parts)
 
 **Embedding nested AnnData** with full interactivity::
 

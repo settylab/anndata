@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from markupsafe import Markup
+
 from .._repr_constants import (
     CSS_BADGE_BACKED,
     CSS_BADGE_LAZY,
@@ -26,7 +28,36 @@ from .._repr_constants import (
     NOT_SERIALIZABLE_MSG,
     STYLE_HIDDEN,
 )
-from .utils import escape_html, sanitize_css_color
+from .utils import escape_html, join_markup, sanitize_css_color, trusted_html
+
+_EMPTY = Markup()
+_COPY_OPEN = Markup('<button class="anndata-entry__copy" style="')
+_COPY_DATA = Markup('" data-copy="')
+_COPY_TITLE = Markup('" title="')
+_COPY_LABEL = Markup('" aria-label="')
+_COPY_CLOSE = Markup('"></button>')
+_NAME_OPEN = Markup(
+    '<span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top">'
+    '<span class="anndata-entry__name-inner">'
+    '<span class="anndata-entry__name-text" title="'
+)
+_NAME_MID = Markup('">')
+_TYPE_OPEN = Markup('<span class="')
+_TYPE_TITLE = Markup('" title="')
+_CAT_ITEM_OPEN = Markup('<span class="anndata-categories__item">')
+_CAT_NAME_OPEN = Markup("<span>")
+_CAT_ITEM_CLOSE = Markup("</span></span>")
+_DOT_OPEN = Markup('<span class="anndata-categories__dot" style="background:')
+_DOT_CLOSE = Markup(';"></span>')
+_SPAN_CLOSE = Markup("</span>")
+_NAME_CLOSE = Markup("</span></span>")
+_DIV_OPEN = Markup('<div class="')
+_DETAILS_OPEN = Markup('<details class="')
+_ATTR_KEY = Markup('" data-key="')
+_ATTR_DTYPE = Markup('" data-dtype="')
+_TAG_END = Markup('">')
+_ROW_OPEN_SUMMARY = Markup('"><summary class="anndata-entry__summary">')
+_CATEGORY_SEP = Markup('<span class="anndata-categories__sep">, </span>')
 
 
 def render_entry_row_open(
@@ -37,7 +68,7 @@ def render_entry_row_open(
     is_error: bool = False,
     has_expandable_content: bool = False,
     extra_classes: str = "",
-) -> str:
+) -> Markup:
     """Render the opening tag for an entry row.
 
     For regular entries, returns ``<div class="anndata-entry ...">``.
@@ -73,20 +104,20 @@ def render_entry_row_open(
         classes.append("error")
     css_class = " ".join(classes)
 
-    escaped_key = escape_html(key)
-    escaped_dtype = escape_html(dtype)
-
-    if has_expandable_content:
-        return (
-            f'<details class="{css_class}" data-key="{escaped_key}" data-dtype="{escaped_dtype}">'
-            f'<summary class="anndata-entry__summary">'
-        )
-    return f'<div class="{css_class}" data-key="{escaped_key}" data-dtype="{escaped_dtype}">'
+    return join_markup([
+        _DETAILS_OPEN if has_expandable_content else _DIV_OPEN,
+        escape_html(css_class),
+        _ATTR_KEY,
+        escape_html(key),
+        _ATTR_DTYPE,
+        escape_html(dtype),
+        _ROW_OPEN_SUMMARY if has_expandable_content else _TAG_END,
+    ])
 
 
 def render_warning_icon(
     warnings: list[str], *, is_not_serializable: bool = False
-) -> str:
+) -> Markup:
     """Render warning icon with tooltip if there are warnings or serialization issues.
 
     Parameters
@@ -101,7 +132,7 @@ def render_warning_icon(
     HTML string for warning icon, or empty string if no warnings.
     """
     if not warnings and not is_not_serializable:
-        return ""
+        return Markup()
 
     # Build the tooltip message
     if is_not_serializable:
@@ -116,11 +147,12 @@ def render_warning_icon(
         # Independent warnings joined with ";"
         title = "; ".join(warnings)
 
-    title = escape_html(title)
-    return f'<span class="anndata-entry__warning" title="{title}">(!)</span>'
+    return Markup('<span class="anndata-entry__warning" title="{}">(!)</span>').format(
+        escape_html(title)
+    )
 
 
-def render_search_box(container_id: str = "") -> str:
+def render_search_box(container_id: str = "") -> Markup:
     """
     Render a search box with filter indicator and search mode toggles.
 
@@ -139,31 +171,33 @@ def render_search_box(container_id: str = "") -> str:
 
     Example
     -------
+    >>> from markupsafe import Markup
     >>> container_id = "spatialdata-123"
-    >>> parts = ['<div class="anndata-header">']
-    >>> parts.append('<span class="anndata-header__type">SpatialData</span>')
-    >>> parts.append('<span class="anndata-spacer"></span>')  # Spacer
+    >>> parts = [Markup('<div class="anndata-header">')]
+    >>> parts.append(Markup('<span class="anndata-header__type">SpatialData</span>'))
+    >>> parts.append(Markup('<span class="anndata-spacer"></span>'))  # Spacer
     >>> parts.append(render_search_box(container_id))
-    >>> parts.append("</div>")
+    >>> parts.append(Markup("</div>"))
+    >>> html = Markup("").join(parts)
     """
     search_id = f"{container_id}-search" if container_id else "anndata-search"
-    return (
-        f'<span class="anndata-search__box" style="{STYLE_HIDDEN}">'
-        f'<input type="text" id="{search_id}" name="{search_id}" '
-        f'class="anndata-search__input" '
-        f'placeholder="Search..." aria-label="Search fields">'
-        f'<span class="anndata-search__toggles">'
-        f'<button type="button" class="anndata-search__toggle anndata-search__toggle--case" '
-        f'title="Match case" aria-label="Match case" aria-pressed="false">Aa</button>'
-        f'<button type="button" class="anndata-search__toggle anndata-search__toggle--regex" '
-        f'title="Use regular expression" aria-label="Use regular expression" aria-pressed="false">.*</button>'
-        f"</span>"
-        f"</span>"
-        f'<span class="anndata-search__indicator"></span>'
-    )
+    return Markup(
+        '<span class="anndata-search__box" style="{style}">'
+        '<input type="text" id="{id}" name="{id}" '
+        'class="anndata-search__input" '
+        'placeholder="Search..." aria-label="Search fields">'
+        '<span class="anndata-search__toggles">'
+        '<button type="button" class="anndata-search__toggle anndata-search__toggle--case" '
+        'title="Match case" aria-label="Match case" aria-pressed="false">Aa</button>'
+        '<button type="button" class="anndata-search__toggle anndata-search__toggle--regex" '
+        'title="Use regular expression" aria-label="Use regular expression" aria-pressed="false">.*</button>'
+        "</span>"
+        "</span>"
+        '<span class="anndata-search__indicator"></span>'
+    ).format(style=STYLE_HIDDEN, id=escape_html(search_id))
 
 
-def render_copy_button(text: str, tooltip: str = "Copy") -> str:
+def render_copy_button(text: str, tooltip: str = "Copy") -> Markup:
     """
     Render a copy-to-clipboard button.
 
@@ -184,26 +218,36 @@ def render_copy_button(text: str, tooltip: str = "Copy") -> str:
     Example
     -------
     >>> name = "gene_expression"
-    >>> html = f"<span>{name}</span>{render_copy_button(name, 'Copy name')}"
+    >>> from markupsafe import Markup
+    >>> html = Markup("<span>{}</span>{}").format(
+    ...     name, render_copy_button(name, "Copy name")
+    ... )
     """
-    escaped_text = escape_html(text)
-    escaped_tooltip = escape_html(tooltip)
-    return (
-        f'<button class="anndata-entry__copy" style="{STYLE_HIDDEN}" '
-        f'data-copy="{escaped_text}" title="{escaped_tooltip}" '
-        f'aria-label="{escaped_tooltip}"></button>'
-    )
+    tooltip_html = escape_html(tooltip)
+    return join_markup([
+        _COPY_OPEN,
+        escape_html(STYLE_HIDDEN),
+        _COPY_DATA,
+        escape_html(text),
+        _COPY_TITLE,
+        tooltip_html,
+        _COPY_LABEL,
+        tooltip_html,
+        _COPY_CLOSE,
+    ])
 
 
-def _render_wrap_button(css_class: str) -> str:
+def _render_wrap_button(css_class: str) -> Markup:
     """Render a wrap toggle button with the specified CSS class.
 
     Internal helper used by render_categories_wrap_button and render_columns_wrap_button.
     """
-    return f'<button class="{css_class}" style="display:none" title="Expand to multi-line view">▼</button>'
+    return Markup(
+        '<button class="{}" style="display:none" title="Expand to multi-line view">▼</button>'
+    ).format(css_class)
 
 
-def render_categories_wrap_button() -> str:
+def render_categories_wrap_button() -> Markup:
     """Render a button to toggle category list between single-line and multi-line.
 
     Returns
@@ -213,7 +257,7 @@ def render_categories_wrap_button() -> str:
     return _render_wrap_button("anndata-categories__wrap")
 
 
-def render_columns_wrap_button() -> str:
+def render_columns_wrap_button() -> Markup:
     """Render a button to toggle column list between single-line and multi-line.
 
     Returns
@@ -223,7 +267,7 @@ def render_columns_wrap_button() -> str:
     return _render_wrap_button("anndata-columns__wrap")
 
 
-def render_muted_span(text: str) -> str:
+def render_muted_span(text: str) -> Markup:
     """Render text in a muted span (gray color).
 
     Parameters
@@ -235,10 +279,10 @@ def render_muted_span(text: str) -> str:
     -------
     HTML string with muted styling
     """
-    return f'<span class="{CSS_TEXT_MUTED}">{escape_html(text)}</span>'
+    return Markup('<span class="%s">%s</span>') % (CSS_TEXT_MUTED, escape_html(text))
 
 
-def render_nested_content(html_content: str) -> str:
+def render_nested_content(html_content: str) -> Markup:
     """Render nested/expanded content inside an expandable entry.
 
     The entry must have been opened with ``has_expandable_content=True``
@@ -255,19 +299,19 @@ def render_nested_content(html_content: str) -> str:
     -------
     HTML closing the summary and wrapping nested content
     """
-    return (
-        f"</summary>"
-        f'<div class="anndata-entry__nested-content" style="margin-left:1.5em">'
-        f'<div class="anndata-entry__expanded">{html_content}</div>'
-        f"</div>"
-    )
+    return Markup(
+        "</summary>"
+        '<div class="anndata-entry__nested-content" style="margin-left:1.5em">'
+        '<div class="anndata-entry__expanded">{}</div>'
+        "</div>"
+    ).format(trusted_html(html_content))
 
 
 def render_badge(
     text: str,
     variant: str = "",
     tooltip: str = "",
-) -> str:
+) -> Markup:
     """
     Render a badge (pill-shaped label).
 
@@ -294,11 +338,14 @@ def render_badge(
     -------
     >>> badge = render_badge("Zarr", "anndata-badge--backed", "Backed by Zarr store")
     """
-    escaped_text = escape_html(text)
-    title_attr = f' title="{escape_html(tooltip)}"' if tooltip else ""
+    title_attr = (
+        Markup(' title="{}"').format(escape_html(tooltip)) if tooltip else Markup()
+    )
     # Always include base class, optionally add variant
     css_class = f"anndata-badge {variant}".strip() if variant else "anndata-badge"
-    return f'<span class="{css_class}"{title_attr}>{escaped_text}</span>'
+    return Markup('<span class="{}"{}>{}</span>').format(
+        css_class, title_attr, escape_html(text)
+    )
 
 
 def render_header_badges(
@@ -309,7 +356,7 @@ def render_header_badges(
     backing_path: str | None = None,
     backing_format: str | None = None,
     is_open: bool | None = None,
-) -> str:
+) -> Markup:
     """
     Render standard header badges for view/backed/lazy status.
 
@@ -343,7 +390,7 @@ def render_header_badges(
     ...     backing_format="Zarr",
     ... )
     """
-    parts = []
+    parts: list[Markup] = []
     if is_view:
         parts.append(
             render_badge("View", CSS_BADGE_VIEW, "This is a view of another object")
@@ -361,12 +408,14 @@ def render_header_badges(
         )
     if (is_backed or is_lazy) and backing_path:
         parts.append(
-            f'<span class="anndata-header__filepath">{escape_html(backing_path)}</span>'
+            Markup('<span class="anndata-header__filepath">{}</span>').format(
+                escape_html(backing_path)
+            )
         )
-    return "".join(parts)
+    return Markup("").join(parts)
 
 
-def render_name_cell(name: str) -> str:
+def render_name_cell(name: str) -> Markup:
     """Render a name cell with copy button and tooltip for truncated names.
 
     The structure uses flexbox so the copy button stays visible even when
@@ -382,14 +431,15 @@ def render_name_cell(name: str) -> str:
     HTML string for the cell div
     """
     escaped_name = escape_html(name)
-    return (
-        f'<span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top">'
-        f'<span class="anndata-entry__name-inner">'
-        f'<span class="anndata-entry__name-text" title="{escaped_name}">{escaped_name}</span>'
-        f"{render_copy_button(name, 'Copy name')}"
-        f"</span>"
-        f"</span>"
-    )
+    return join_markup([
+        _NAME_OPEN,
+        escaped_name,
+        _NAME_MID,
+        escaped_name,
+        _SPAN_CLOSE,
+        render_copy_button(name, "Copy name"),
+        _NAME_CLOSE,
+    ])
 
 
 def render_category_list(
@@ -398,7 +448,7 @@ def render_category_list(
     max_cats: int,
     *,
     n_hidden: int = 0,
-) -> str:
+) -> Markup:
     """Render a list of category values with optional color dots.
 
     Parameters
@@ -417,32 +467,38 @@ def render_category_list(
     -------
     HTML string for the category list
     """
-    parts = ['<span class="anndata-categories">']
+    parts = [Markup('<span class="anndata-categories">')]
     for i, cat in enumerate(categories[:max_cats]):
         if i > 0:
-            parts.append('<span class="anndata-categories__sep">, </span>')
-        cat_name = escape_html(str(cat))
+            parts.append(_CATEGORY_SEP)
         color = colors[i] if colors and i < len(colors) else None
-        parts.append('<span class="anndata-categories__item">')
+        dot = _EMPTY
         if color:
             # Sanitize color to prevent CSS injection
             safe_color = sanitize_css_color(str(color))
             if safe_color:
-                parts.append(
-                    f'<span class="anndata-categories__dot" style="background:{safe_color};"></span>'
-                )
+                dot = join_markup([_DOT_OPEN, escape_html(safe_color), _DOT_CLOSE])
             # Skip color dot if color is invalid/unsafe
-        parts.append(f"<span>{cat_name}</span>")
-        parts.append("</span>")
+        parts.extend([
+            _CAT_ITEM_OPEN,
+            dot,
+            _CAT_NAME_OPEN,
+            escape_html(str(cat)),
+            _CAT_ITEM_CLOSE,
+        ])
 
     # Calculate total hidden: from max_cats truncation + lazy truncation
     hidden_from_max_cats = max(0, len(categories) - max_cats)
     total_hidden = hidden_from_max_cats + n_hidden
 
     if total_hidden > 0:
-        parts.append(f'<span class="{CSS_TEXT_MUTED}">...+{total_hidden}</span>')
-    parts.append("</span>")
-    return "".join(parts)
+        parts.append(
+            Markup('<span class="{}">...+{}</span>').format(
+                CSS_TEXT_MUTED, total_hidden
+            )
+        )
+    parts.append(_SPAN_CLOSE)
+    return join_markup(parts)
 
 
 @dataclass
@@ -494,7 +550,7 @@ class TypeCellConfig:
 
     type_name: str
     css_class: str
-    type_html: str | None = None
+    type_html: str | Markup | None = None
     tooltip: str = ""
     warnings: list[str] = field(default_factory=list)
     is_not_serializable: bool = False
@@ -503,7 +559,7 @@ class TypeCellConfig:
     append_type_html: bool = False
 
 
-def render_entry_type_cell(config: TypeCellConfig) -> str:
+def render_entry_type_cell(config: TypeCellConfig) -> Markup:
     """Render the type cell for an entry row.
 
     This is a unified helper that handles all type cell variations:
@@ -553,20 +609,33 @@ def render_entry_type_cell(config: TypeCellConfig) -> str:
     append_type_html = config.append_type_html
 
     parts = [
-        '<span class="anndata-entry__type" style="display:inline-block;min-width:var(--anndata-type-col-width,180px);vertical-align:top">'
+        Markup(
+            '<span class="anndata-entry__type" style="display:inline-block;min-width:var(--anndata-type-col-width,180px);vertical-align:top">'
+        )
     ]
 
     # Type content: handle different cases
     if type_html and not append_type_html:
         # type_html replaces the type label entirely
-        parts.append(type_html)
+        parts.append(trusted_html(type_html))
     elif tooltip:
-        parts.append(
-            f'<span class="{css_class}" title="{escape_html(tooltip)}">'
-            f"{escape_html(type_name)}</span>"
-        )
+        parts.extend([
+            _TYPE_OPEN,
+            escape_html(css_class),
+            _TYPE_TITLE,
+            escape_html(tooltip),
+            _NAME_MID,
+            escape_html(type_name),
+            _SPAN_CLOSE,
+        ])
     else:
-        parts.append(f'<span class="{css_class}">{escape_html(type_name)}</span>')
+        parts.extend([
+            _TYPE_OPEN,
+            escape_html(css_class),
+            _NAME_MID,
+            escape_html(type_name),
+            _SPAN_CLOSE,
+        ])
 
     # Warning icon
     parts.append(
@@ -581,16 +650,20 @@ def render_entry_type_cell(config: TypeCellConfig) -> str:
 
     # Appended type_html (for custom inline rendering below the type)
     if type_html and append_type_html:
-        parts.append(f'<span class="anndata-entry__custom">{type_html}</span>')
+        parts.append(
+            Markup('<span class="anndata-entry__custom">{}</span>').format(
+                trusted_html(type_html)
+            )
+        )
 
-    parts.append("</span>")
-    return "".join(parts)
+    parts.append(_SPAN_CLOSE)
+    return join_markup(parts)
 
 
 def render_entry_preview_cell(
     preview_html: str | None = None,
     preview_text: str | None = None,
-) -> str:
+) -> Markup:
     """Render the preview cell (third column) for an entry row.
 
     Formatters are responsible for producing complete preview content.
@@ -608,13 +681,15 @@ def render_entry_preview_cell(
     HTML string for the preview cell
     """
     parts = [
-        '<span class="anndata-entry__preview" style="display:inline-block;vertical-align:top">'
+        Markup(
+            '<span class="anndata-entry__preview" style="display:inline-block;vertical-align:top">'
+        )
     ]
 
     if preview_html:
-        parts.append(preview_html)
+        parts.append(trusted_html(preview_html))
     elif preview_text:
         parts.append(render_muted_span(preview_text))
 
-    parts.append("</span>")
-    return "".join(parts)
+    parts.append(_SPAN_CLOSE)
+    return join_markup(parts)

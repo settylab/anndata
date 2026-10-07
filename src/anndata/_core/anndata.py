@@ -653,7 +653,9 @@ class AnnData:  # noqa: PLW1641
         try:
             from anndata._repr import generate_repr_html
 
-            return generate_repr_html(self)
+            # Plain str for the `_repr_html_` protocol: callers concatenate it
+            # (`markup + "<hr>"` would escape the plain-str side)
+            return str(generate_repr_html(self))
         except Exception as e:  # noqa: BLE001
             # Intentional broad catch: HTML repr should never crash the notebook
             # Fall back to text repr if HTML generation fails, but log the error

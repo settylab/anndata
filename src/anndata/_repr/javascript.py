@@ -18,6 +18,8 @@ import json
 from functools import cache
 from importlib.resources import files
 
+from markupsafe import Markup
+
 from .utils import get_anndata_version
 
 
@@ -38,7 +40,7 @@ def _load_js_content() -> str:
     return _minify_js(js)
 
 
-def get_javascript(container_id: str) -> str:
+def get_javascript(container_id: str) -> Markup:
     """
     Get the JavaScript code for a specific container.
 
@@ -63,7 +65,7 @@ def get_javascript(container_id: str) -> str:
     # json.dumps produces valid JS string literals; "</" cannot appear in them
     version = json.dumps(get_anndata_version()).replace("</", "<\\/")
     container = json.dumps(container_id).replace("</", "<\\/")
-    return f"""<script>
+    script = f"""<script>
 (function() {{
 const container = document.getElementById({container});
 if (!container) return;
@@ -75,3 +77,6 @@ registry[version] ??= function(container) {{
 registry[version](container);
 }})();
 </script>"""
+    # Pre-built from the packaged script; the interpolated values are
+    # JSON-encoded with "</" escaped, so they cannot close the tag
+    return Markup(script)  # noqa: S704

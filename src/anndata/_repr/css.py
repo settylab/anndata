@@ -6,6 +6,8 @@ import re
 from functools import cache
 from importlib.resources import files
 
+from markupsafe import Markup
+
 _CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
@@ -20,11 +22,13 @@ def _minify_css(css: str) -> str:
 
 
 @cache
-def get_css() -> str:
+def get_css() -> Markup:
     """Get the complete CSS for the HTML representation.
 
     Dark/light theming is handled entirely in CSS via ``light-dark()``
     and ``color-scheme`` — no Python-side substitution needed.
     """
     css = files("anndata._repr.static").joinpath("repr.css").read_text(encoding="utf-8")
-    return f"<style>\n{_minify_css(css)}\n</style>"
+    # Pre-built from the packaged stylesheet, not user data
+    block = f"<style>\n{_minify_css(css)}\n</style>"
+    return Markup(block)  # noqa: S704

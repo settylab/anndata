@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from markupsafe import Markup
 
 from .._core.anndata import AnnData
 from .._core.xarray import Dataset2D
@@ -69,6 +70,7 @@ from .utils import (
     get_column_colors,
     is_color_list,
     is_serializable,
+    join_markup,
     preview_dict,
     preview_number,
     preview_sequence,
@@ -353,10 +355,12 @@ class DataFrameFormatter(TypeFormatter[pd.DataFrame | Dataset2D]):
         preview_html = None
         if n_cols > 0 and context.section in ("obsm", "varm"):
             shown = cols[:DF_COLUMNS_PREVIEW_LIMIT]
-            col_str = ", ".join(escape_html(str(c)) for c in shown)
+            col_str = Markup(", ").join(escape_html(str(c)) for c in shown)
             if n_cols > len(shown):
-                col_str += f", …+{format_number(n_cols - len(shown))}"
-            preview_html = f'<span class="anndata-columns">[{col_str}]</span>'
+                col_str += Markup(", …+{}").format(format_number(n_cols - len(shown)))
+            preview_html = Markup('<span class="anndata-columns">[{}]</span>').format(
+                col_str
+            )
 
         # Check if expandable _repr_html_ is enabled
         expand_dataframes = settings.repr_html_dataframe_expand
@@ -373,7 +377,8 @@ class DataFrameFormatter(TypeFormatter[pd.DataFrame | Dataset2D]):
             # Intentional broad catch: _repr_html_() can fail in many ways
             # (memory, recursion, custom dtypes, etc.) - gracefully degrade
             with contextlib.suppress(Exception):
-                expanded_html = df._repr_html_()  # type: ignore[operator]
+                # Trust boundary: pandas' own HTML repr (it escapes cell values)
+                expanded_html = Markup(df._repr_html_())  # type: ignore[operator]  # noqa: S704
 
         shape_str = f"{format_number(n_rows)} × {format_number(n_cols)}"
         return FormattedOutput(
@@ -525,11 +530,13 @@ class CategoricalFormatter(TypeFormatter[pd.Categorical | pd.Series]):
                 if len(categories) == 0:
                     # Metadata-only mode or no categories: show just count
                     if n_total is not None:
-                        preview_html = f'<span class="{CSS_TEXT_MUTED}">({n_total} categories)</span>'
+                        preview_html = Markup(
+                            '<span class="{}">({} categories)</span>'
+                        ).format(CSS_TEXT_MUTED, n_total)
                     else:
-                        preview_html = (
-                            f'<span class="{CSS_TEXT_MUTED}">(categories)</span>'
-                        )
+                        preview_html = Markup(
+                            '<span class="{}">(categories)</span>'
+                        ).format(CSS_TEXT_MUTED)
                 else:
                     n_hidden = (
                         (n_total - len(categories))
@@ -844,7 +851,9 @@ class AnnDataFormatter(TypeFormatter[AnnData]):
                 show_header=True,
                 show_search=False,
             )
-            expanded_html = f'<div class="{CSS_NESTED_ANNDATA}">{nested_html}</div>'
+            expanded_html = Markup('<div class="{}">{}</div>').format(
+                CSS_NESTED_ANNDATA, nested_html
+            )
 
         return FormattedOutput(
             type_name=f"{type(obj).__name__} ({shape_str})",
@@ -962,6 +971,11 @@ class DictFormatter(TypeFormatter[dict]):
         )
 
 
+_SWATCH_OPEN = Markup('<span class="{}" style="background:').format(CSS_COLORS_SWATCH)
+_SWATCH_TITLE = Markup('" title="')
+_SWATCH_CLOSE = Markup('"></span>')
+
+
 class ColorListFormatter(TypeFormatter[object]):
     """Formatter for color lists (uns entries ending in _colors).
 
@@ -1007,22 +1021,35 @@ class ColorListFormatter(TypeFormatter[object]):
             safe_color = sanitize_css_color(str(color))
             if safe_color:
                 swatches.append(
-                    f'<span class="{CSS_COLORS_SWATCH}" '
-                    f'style="background:{safe_color}" title="{escape_html(str(color))}"></span>'
+                    join_markup([
+                        _SWATCH_OPEN,
+                        escape_html(safe_color),
+                        _SWATCH_TITLE,
+                        escape_html(str(color)),
+                        _SWATCH_CLOSE,
+                    ])
                 )
             else:
                 # Invalid/unsafe color - show as text only, no style
                 invalid_count += 1
                 swatches.append(
-                    f'<span class="{CSS_COLORS_SWATCH} {CSS_COLORS_SWATCH_INVALID}" '
-                    f"""title="Invalid color: '{escape_html(str(color))}'">?</span>"""
+                    Markup('<span class="%s %s" title="Invalid color: \'%s\'">?</span>')
+                    % (
+                        CSS_COLORS_SWATCH,
+                        CSS_COLORS_SWATCH_INVALID,
+                        escape_html(str(color)),
+                    )
                 )
         if n_colors > COLOR_PREVIEW_LIMIT:
             swatches.append(
-                f'<span class="{CSS_TEXT_MUTED}">+{n_colors - COLOR_PREVIEW_LIMIT}</span>'
+                Markup('<span class="{}">+{}</span>').format(
+                    CSS_TEXT_MUTED, n_colors - COLOR_PREVIEW_LIMIT
+                )
             )
 
-        preview_html = f'<span class="{CSS_COLORS}">{"".join(swatches)}</span>'
+        preview_html = Markup('<span class="{}">{}</span>').format(
+            CSS_COLORS, join_markup(swatches)
+        )
 
         # Build warnings list (only for colors within preview limit)
         warnings = []

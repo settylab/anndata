@@ -9,6 +9,8 @@ This module provides a registry system that allows:
 
 Usage for extending to new types:
 
+    from markupsafe import Markup
+
     from anndata._repr import register_formatter, TypeFormatter, FormattedOutput
 
     # Format by Python type (e.g., custom array in obsm)
@@ -21,8 +23,13 @@ Usage for extending to new types:
             return FormattedOutput(
                 type_name=f"MyArray {obj.shape}",
                 css_class="anndata-dtype--myarray",
-                # preview_html for rightmost column (data preview, counts, etc.)
-                preview_html=f'<span class="anndata-text--muted">({obj.n_items} items)</span>',
+                # preview_html for rightmost column (data preview, counts, etc.).
+                # Build it with Markup so that dynamic values are escaped:
+                preview_html=Markup(
+                    '<span class="anndata-text--muted">({} items)</span>'
+                ).format(obj.n_items),
+                # Or just pass plain text, which anndata escapes for you:
+                # preview=f"({obj.n_items} items)",
             )
 
     # Format by embedded type hint (e.g., tagged data in uns)
@@ -40,7 +47,7 @@ Usage for extending to new types:
             hint, data = extract_uns_type_hint(obj)
             return FormattedOutput(
                 type_name="config",
-                preview_html='<span>Custom config preview</span>',
+                preview_html=Markup("<span>Custom config preview</span>"),
             )
 """
 
@@ -50,6 +57,8 @@ import reprlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, overload
+
+from markupsafe import Markup
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -104,7 +113,11 @@ class FormattedOutput:
 
     Field naming convention
     -----------------------
-    - ``*_html`` fields contain raw HTML (caller responsible for escaping)
+    - ``*_html`` fields contain HTML. Build them with
+      ``Markup("<b>{}</b>").format(value)``, which escapes ``value``; or use
+      the plain-text fields, which anndata escapes for you.
+      For backward compatibility a plain ``str`` in an ``*_html`` field is
+      still emitted verbatim (the caller is responsible for escaping it).
     - Other string fields are plain text (auto-escaped when rendered)
 
     Available CSS classes
@@ -130,9 +143,10 @@ class FormattedOutput:
     Always used for data-dtype attribute (search/filter). Auto-escaped.
     Defaults to 'unknown' for resilience when type extraction fails."""
 
-    type_html: str | None = None
-    """Optional. Raw HTML to render in type column instead of type_name.
-    If provided, replaces the visual rendering but type_name still used for data-dtype."""
+    type_html: str | Markup | None = None
+    """Optional. HTML to render in type column instead of type_name.
+    If provided, replaces the visual rendering but type_name still used for data-dtype.
+    A plain ``str`` is trusted as-is; prefer :class:`~markupsafe.Markup`."""
 
     css_class: str = CSS_DTYPE_UNKNOWN
     """CSS class for styling the type column."""
@@ -147,13 +161,15 @@ class FormattedOutput:
     """Optional. Plain text for preview column (rightmost). Auto-escaped.
     Ignored if preview_html is provided."""
 
-    preview_html: str | None = None
-    """Optional. Raw HTML for preview column (e.g., category pills with colors).
-    Takes precedence over preview if both are provided."""
+    preview_html: str | Markup | None = None
+    """Optional. HTML for preview column (e.g., category pills with colors).
+    Takes precedence over preview if both are provided.
+    A plain ``str`` is trusted as-is; prefer :class:`~markupsafe.Markup`."""
 
-    expanded_html: str | None = None
-    """Optional. Raw HTML for expandable content shown in collapsible row below.
-    If provided, an 'Expand ▼' button is added to the type column."""
+    expanded_html: str | Markup | None = None
+    """Optional. HTML for expandable content shown in collapsible row below.
+    If provided, an 'Expand ▼' button is added to the type column.
+    A plain ``str`` is trusted as-is; prefer :class:`~markupsafe.Markup`."""
 
     is_serializable: bool = True
     """Whether this type can be serialized to H5AD/Zarr."""
@@ -562,9 +578,8 @@ class FallbackFormatter(TypeFormatter[object]):
         preview_html = None
         if error is None and not is_extension:
             warnings.append(f"Unknown type: {full_name}")
-            preview_html = (
-                f'<span class="{CSS_TEXT_WARNING}">'
-                f"{escape_html(f'Unknown type: {full_name}')}</span>"
+            preview_html = Markup('<span class="{}">{}</span>').format(
+                CSS_TEXT_WARNING, escape_html(f"Unknown type: {full_name}")
             )
 
         return FormattedOutput(
@@ -913,7 +928,7 @@ def extract_uns_type_hint(value: object) -> tuple[str | None, object]:
                 # Render your custom visualization
                 return FormattedOutput(
                     type_name="mytype",
-                    preview_html="<span>Custom rendering</span>",
+                    preview_html=Markup("<span>Custom rendering</span>"),
                 )
 
     2. When the user imports your package, the formatter is registered
