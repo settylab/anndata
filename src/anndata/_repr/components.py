@@ -28,7 +28,36 @@ from .._repr_constants import (
     NOT_SERIALIZABLE_MSG,
     STYLE_HIDDEN,
 )
-from .utils import escape_html, sanitize_css_color, trusted_html
+from .utils import escape_html, join_markup, sanitize_css_color, trusted_html
+
+_EMPTY = Markup()
+_COPY_OPEN = Markup('<button class="anndata-entry__copy" style="')
+_COPY_DATA = Markup('" data-copy="')
+_COPY_TITLE = Markup('" title="')
+_COPY_LABEL = Markup('" aria-label="')
+_COPY_CLOSE = Markup('"></button>')
+_NAME_OPEN = Markup(
+    '<span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top">'
+    '<span class="anndata-entry__name-inner">'
+    '<span class="anndata-entry__name-text" title="'
+)
+_NAME_MID = Markup('">')
+_TYPE_OPEN = Markup('<span class="')
+_TYPE_TITLE = Markup('" title="')
+_CAT_ITEM_OPEN = Markup('<span class="anndata-categories__item">')
+_CAT_NAME_OPEN = Markup("<span>")
+_CAT_ITEM_CLOSE = Markup("</span></span>")
+_DOT_OPEN = Markup('<span class="anndata-categories__dot" style="background:')
+_DOT_CLOSE = Markup(';"></span>')
+_SPAN_CLOSE = Markup("</span>")
+_NAME_CLOSE = Markup("</span></span>")
+_DIV_OPEN = Markup('<div class="')
+_DETAILS_OPEN = Markup('<details class="')
+_ATTR_KEY = Markup('" data-key="')
+_ATTR_DTYPE = Markup('" data-dtype="')
+_TAG_END = Markup('">')
+_ROW_OPEN_SUMMARY = Markup('"><summary class="anndata-entry__summary">')
+_CATEGORY_SEP = Markup('<span class="anndata-categories__sep">, </span>')
 
 
 def render_entry_row_open(
@@ -75,14 +104,15 @@ def render_entry_row_open(
         classes.append("error")
     css_class = " ".join(classes)
 
-    attrs = Markup('class="{}" data-key="{}" data-dtype="{}"').format(
-        css_class, escape_html(key), escape_html(dtype)
-    )
-    if has_expandable_content:
-        return Markup('<details {}><summary class="anndata-entry__summary">').format(
-            attrs
-        )
-    return Markup("<div {}>").format(attrs)
+    return join_markup([
+        _DETAILS_OPEN if has_expandable_content else _DIV_OPEN,
+        escape_html(css_class),
+        _ATTR_KEY,
+        escape_html(key),
+        _ATTR_DTYPE,
+        escape_html(dtype),
+        _ROW_OPEN_SUMMARY if has_expandable_content else _TAG_END,
+    ])
 
 
 def render_warning_icon(
@@ -193,11 +223,18 @@ def render_copy_button(text: str, tooltip: str = "Copy") -> Markup:
     ...     name, render_copy_button(name, "Copy name")
     ... )
     """
-    return Markup(
-        '<button class="anndata-entry__copy" style="{style}" '
-        'data-copy="{text}" title="{tooltip}" '
-        'aria-label="{tooltip}"></button>'
-    ).format(style=STYLE_HIDDEN, text=escape_html(text), tooltip=escape_html(tooltip))
+    tooltip_html = escape_html(tooltip)
+    return join_markup([
+        _COPY_OPEN,
+        escape_html(STYLE_HIDDEN),
+        _COPY_DATA,
+        escape_html(text),
+        _COPY_TITLE,
+        tooltip_html,
+        _COPY_LABEL,
+        tooltip_html,
+        _COPY_CLOSE,
+    ])
 
 
 def _render_wrap_button(css_class: str) -> Markup:
@@ -242,9 +279,7 @@ def render_muted_span(text: str) -> Markup:
     -------
     HTML string with muted styling
     """
-    return Markup('<span class="{}">{}</span>').format(
-        CSS_TEXT_MUTED, escape_html(text)
-    )
+    return Markup('<span class="%s">%s</span>') % (CSS_TEXT_MUTED, escape_html(text))
 
 
 def render_nested_content(html_content: str) -> Markup:
@@ -396,14 +431,15 @@ def render_name_cell(name: str) -> Markup:
     HTML string for the cell div
     """
     escaped_name = escape_html(name)
-    return Markup(
-        '<span class="anndata-entry__name" style="display:inline-block;min-width:var(--anndata-name-col-width,100px);vertical-align:top">'
-        '<span class="anndata-entry__name-inner">'
-        '<span class="anndata-entry__name-text" title="{name}">{name}</span>'
-        "{copy}"
-        "</span>"
-        "</span>"
-    ).format(name=escaped_name, copy=render_copy_button(name, "Copy name"))
+    return join_markup([
+        _NAME_OPEN,
+        escaped_name,
+        _NAME_MID,
+        escaped_name,
+        _SPAN_CLOSE,
+        render_copy_button(name, "Copy name"),
+        _NAME_CLOSE,
+    ])
 
 
 def render_category_list(
@@ -434,22 +470,22 @@ def render_category_list(
     parts = [Markup('<span class="anndata-categories">')]
     for i, cat in enumerate(categories[:max_cats]):
         if i > 0:
-            parts.append(Markup('<span class="anndata-categories__sep">, </span>'))
-        cat_name = escape_html(str(cat))
+            parts.append(_CATEGORY_SEP)
         color = colors[i] if colors and i < len(colors) else None
-        parts.append(Markup('<span class="anndata-categories__item">'))
+        dot = _EMPTY
         if color:
             # Sanitize color to prevent CSS injection
             safe_color = sanitize_css_color(str(color))
             if safe_color:
-                parts.append(
-                    Markup(
-                        '<span class="anndata-categories__dot" style="background:{};"></span>'
-                    ).format(safe_color)
-                )
+                dot = join_markup([_DOT_OPEN, escape_html(safe_color), _DOT_CLOSE])
             # Skip color dot if color is invalid/unsafe
-        parts.append(Markup("<span>{}</span>").format(cat_name))
-        parts.append(Markup("</span>"))
+        parts.extend([
+            _CAT_ITEM_OPEN,
+            dot,
+            _CAT_NAME_OPEN,
+            escape_html(str(cat)),
+            _CAT_ITEM_CLOSE,
+        ])
 
     # Calculate total hidden: from max_cats truncation + lazy truncation
     hidden_from_max_cats = max(0, len(categories) - max_cats)
@@ -461,8 +497,8 @@ def render_category_list(
                 CSS_TEXT_MUTED, total_hidden
             )
         )
-    parts.append(Markup("</span>"))
-    return Markup("").join(parts)
+    parts.append(_SPAN_CLOSE)
+    return join_markup(parts)
 
 
 @dataclass
@@ -583,17 +619,23 @@ def render_entry_type_cell(config: TypeCellConfig) -> Markup:
         # type_html replaces the type label entirely
         parts.append(trusted_html(type_html))
     elif tooltip:
-        parts.append(
-            Markup('<span class="{}" title="{}">{}</span>').format(
-                css_class, escape_html(tooltip), escape_html(type_name)
-            )
-        )
+        parts.extend([
+            _TYPE_OPEN,
+            escape_html(css_class),
+            _TYPE_TITLE,
+            escape_html(tooltip),
+            _NAME_MID,
+            escape_html(type_name),
+            _SPAN_CLOSE,
+        ])
     else:
-        parts.append(
-            Markup('<span class="{}">{}</span>').format(
-                css_class, escape_html(type_name)
-            )
-        )
+        parts.extend([
+            _TYPE_OPEN,
+            escape_html(css_class),
+            _NAME_MID,
+            escape_html(type_name),
+            _SPAN_CLOSE,
+        ])
 
     # Warning icon
     parts.append(
@@ -614,8 +656,8 @@ def render_entry_type_cell(config: TypeCellConfig) -> Markup:
             )
         )
 
-    parts.append(Markup("</span>"))
-    return Markup("").join(parts)
+    parts.append(_SPAN_CLOSE)
+    return join_markup(parts)
 
 
 def render_entry_preview_cell(
@@ -649,5 +691,5 @@ def render_entry_preview_cell(
     elif preview_text:
         parts.append(render_muted_span(preview_text))
 
-    parts.append(Markup("</span>"))
-    return Markup("").join(parts)
+    parts.append(_SPAN_CLOSE)
+    return join_markup(parts)

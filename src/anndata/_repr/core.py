@@ -171,23 +171,23 @@ def render_details_section(  # noqa: PLR0913
         else Markup()
     )
     return Markup(
-        '<details class="{classes}" data-section="{section_id}"{open_attr}>'
+        '<details class="%(classes)s" data-section="%(section_id)s"%(open_attr)s>'
         "<summary>"
-        '<span class="anndata-section__name">{name}</span>'
-        '<span class="anndata-section__count">{count}</span>'
-        "{help_link}"
+        '<span class="anndata-section__name">%(name)s</span>'
+        '<span class="anndata-section__count">%(count)s</span>'
+        "%(help_link)s"
         "</summary>"
-        '<div class="anndata-section__content">{content}</div>'
+        '<div class="anndata-section__content">%(content)s</div>'
         "</details>"
-    ).format(
-        classes=classes,
-        section_id=escape_html(section_id),
-        open_attr=open_attr,
-        name=escape_html(name),
-        count=trusted_html(count_html),
-        help_link=help_link,
-        content=trusted_html(content_html),
-    )
+    ) % {
+        "classes": classes,
+        "section_id": escape_html(section_id),
+        "open_attr": open_attr,
+        "name": escape_html(name),
+        "count": trusted_html(count_html),
+        "help_link": help_link,
+        "content": trusted_html(content_html),
+    }
 
 
 def pluralize(n: int, noun: str) -> str:

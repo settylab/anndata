@@ -71,6 +71,15 @@ as before. New code should prefer ``Markup`` (escapes dynamic parts) or the
 plain-text fields (``preview``, ``type_name``, ``tooltip``), which are always
 escaped.
 
+**Combining with plain strings**: the ``render_*`` helpers, ``get_css``,
+``get_javascript``, ``generate_repr_html`` and ``escape_html`` return
+:class:`~markupsafe.Markup`. ``Markup + str`` (in either order) escapes the plain
+``str``, so ``render_badge("x") + "<hr>"`` yields ``&lt;hr&gt;``. Use
+``Markup(...) + Markup(...)``, ``Markup("{}{}").format(a, b)``,
+``Markup("").join(parts)``, an f-string or ``"".join(parts)`` instead (the last
+two give a plain ``str``, which is trusted as before when passed back to
+anndata). ``AnnData._repr_html_()`` returns a plain ``str`` for this reason.
+
 Extensibility
 -------------
 The system is designed to be extensible via two registry patterns:

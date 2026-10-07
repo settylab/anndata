@@ -178,3 +178,17 @@ def test_escape_html_replaces_null_bytes_and_is_not_double_escaped():
     out = escape_html("a\x00<b>")
     assert out == "a�&lt;b&gt;"
     assert Markup("{}").format(out) == out
+
+
+def test_join_markup_matches_markup_join():
+    from anndata._repr.utils import join_markup
+
+    parts = [Markup("<b>"), escape_html("a<b"), Markup("</b>")]
+    assert join_markup(parts) == Markup("").join(parts)
+    assert join_markup(parts, ", ") == Markup(", ").join(parts)
+    assert isinstance(join_markup(parts), Markup)
+
+
+def test_markup_plus_plain_str_escapes_the_plain_side():
+    """Documented caveat: compose with Markup, not with plain-str ``+``."""
+    assert render_badge("x") + "<hr>" == render_badge("x") + Markup("&lt;hr&gt;")

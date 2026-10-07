@@ -70,6 +70,7 @@ from .utils import (
     get_column_colors,
     is_color_list,
     is_serializable,
+    join_markup,
     preview_dict,
     preview_number,
     preview_sequence,
@@ -970,6 +971,11 @@ class DictFormatter(TypeFormatter[dict]):
         )
 
 
+_SWATCH_OPEN = Markup('<span class="{}" style="background:').format(CSS_COLORS_SWATCH)
+_SWATCH_TITLE = Markup('" title="')
+_SWATCH_CLOSE = Markup('"></span>')
+
+
 class ColorListFormatter(TypeFormatter[object]):
     """Formatter for color lists (uns entries ending in _colors).
 
@@ -1015,17 +1021,20 @@ class ColorListFormatter(TypeFormatter[object]):
             safe_color = sanitize_css_color(str(color))
             if safe_color:
                 swatches.append(
-                    Markup(
-                        '<span class="{}" style="background:{}" title="{}"></span>'
-                    ).format(CSS_COLORS_SWATCH, safe_color, escape_html(str(color)))
+                    join_markup([
+                        _SWATCH_OPEN,
+                        escape_html(safe_color),
+                        _SWATCH_TITLE,
+                        escape_html(str(color)),
+                        _SWATCH_CLOSE,
+                    ])
                 )
             else:
                 # Invalid/unsafe color - show as text only, no style
                 invalid_count += 1
                 swatches.append(
-                    Markup(
-                        '<span class="{} {}" title="Invalid color: \'{}\'">?</span>'
-                    ).format(
+                    Markup('<span class="%s %s" title="Invalid color: \'%s\'">?</span>')
+                    % (
                         CSS_COLORS_SWATCH,
                         CSS_COLORS_SWATCH_INVALID,
                         escape_html(str(color)),
@@ -1039,7 +1048,7 @@ class ColorListFormatter(TypeFormatter[object]):
             )
 
         preview_html = Markup('<span class="{}">{}</span>').format(
-            CSS_COLORS, Markup("").join(swatches)
+            CSS_COLORS, join_markup(swatches)
         )
 
         # Build warnings list (only for colors within preview limit)

@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -475,8 +476,35 @@ def escape_html(text: object) -> Markup:
     Returns :class:`~markupsafe.Markup`, so the result is not escaped again
     when it is passed to ``Markup.format`` or ``Markup.join``.
     """
+    text = str(text)
+    if len(text) <= _ESCAPE_CACHE_MAX_LEN:
+        return _escape_short(text)
+    return _escape(text)
+
+
+# Keys, type names and categories are escaped several times per row (name,
+# tooltip, data attributes), so short strings are memoized.
+_ESCAPE_CACHE_MAX_LEN = 64
+
+
+def _escape(text: str) -> Markup:
     # the argument is escaped right here, so the result is safe by construction
-    return Markup(html.escape(str(text).replace("\x00", "\ufffd")))  # noqa: S704
+    return Markup(html.escape(text.replace("\x00", "\ufffd")))  # noqa: S704
+
+
+_escape_short = lru_cache(maxsize=4096)(_escape)
+
+
+def join_markup(parts: Iterable[Markup], sep: str = "") -> Markup:
+    """Concatenate :class:`~markupsafe.Markup` fragments.
+
+    Same result as ``Markup(sep).join(parts)`` but without escaping (copying)
+    every fragment again, which dominates the cost for large lists. The type
+    checker enforces that all fragments are already ``Markup``; ``sep`` must
+    be a literal.
+    """
+    # concatenating already-escaped fragments cannot introduce unescaped text
+    return Markup(sep.join(parts))  # noqa: S704
 
 
 def trusted_html(value: str | Markup) -> Markup:
