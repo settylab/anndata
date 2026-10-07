@@ -594,7 +594,7 @@ try:
                 7. get_javascript(id) - include interactivity
             """
             container_id = f"spatialdata-{uuid.uuid4().hex[:8]}"
-            parts = []
+            parts: list[str] = []  # plain-str HTML parts keep working
 
             # --- STEP 1: Include anndata's CSS ---
             parts.append(get_css())
