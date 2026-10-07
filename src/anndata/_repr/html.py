@@ -222,7 +222,7 @@ def generate_repr_html(  # noqa: PLR0913
     """
     # Check if HTML repr is enabled
     if not settings.repr_html_enabled:
-        return Markup(get_macros().pre_fallback(repr(adata)))
+        return get_macros().pre_fallback(repr(adata))
 
     # Create formatter context (resolves settings)
     context = _create_formatter_context(
@@ -498,7 +498,7 @@ def _build_readme_icon(adata: AnnData) -> Markup | None:
     readme_content = readme_content.replace("\x00", "\ufffd")
     tooltip_text = tooltip_text.replace("\x00", "\ufffd")
 
-    return Markup(get_macros().readme_icon(readme_content, tooltip_text))
+    return get_macros().readme_icon(readme_content, tooltip_text)
 
 
 def _render_header(

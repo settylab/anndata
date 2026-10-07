@@ -241,7 +241,7 @@ def render_index_preview(obj: object) -> Markup:
 
 def render_truncation_indicator(remaining: int) -> Markup:
     """Render a truncation indicator."""
-    return Markup(get_macros().truncation_indicator(format_number(remaining)))
+    return get_macros().truncation_indicator(format_number(remaining))
 
 
 def get_section_tooltip(section: str) -> str:

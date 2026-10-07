@@ -500,7 +500,7 @@ def _render_raw_section(
     ]
     if can_expand:
         nested_html = _generate_raw_repr_html(raw, context.child("raw"))
-        wrapped_html = Markup(get_macros().nested_anndata_wrapper(nested_html))
+        wrapped_html = get_macros().nested_anndata_wrapper(nested_html)
         row_parts.append(render_nested_content(wrapped_html))
         row_parts.append(Markup("</details>"))
     else:

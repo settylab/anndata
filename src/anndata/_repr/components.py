@@ -71,7 +71,7 @@ def render_entry_row_open(
     if is_error:
         classes.append("error")
     css_class = " ".join(classes)
-    return Markup(get_macros().row_open(key, dtype, css_class, has_expandable_content))
+    return get_macros().row_open(key, dtype, css_class, has_expandable_content)
 
 
 def render_warning_icon(
@@ -90,7 +90,7 @@ def render_warning_icon(
     -------
     ``Markup`` HTML for warning icon, or empty ``Markup`` if no warnings.
     """
-    return Markup(get_macros().warning_icon(warnings or [], is_not_serializable))
+    return get_macros().warning_icon(warnings or [], is_not_serializable)
 
 
 def render_search_box(container_id: str = "") -> Markup:
@@ -111,7 +111,7 @@ def render_search_box(container_id: str = "") -> Markup:
     ``Markup`` HTML for the search box.
     """
     search_id = f"{container_id}-search" if container_id else "anndata-search"
-    return Markup(get_macros().search_box(search_id))
+    return get_macros().search_box(search_id)
 
 
 def render_copy_button(text: str, tooltip: str = "Copy") -> Markup:
@@ -137,7 +137,7 @@ def render_copy_button(text: str, tooltip: str = "Copy") -> Markup:
     >>> name = "gene_expression"
     >>> html = f"<span>{name}</span>{render_copy_button(name, 'Copy name')}"
     """
-    return Markup(get_macros().copy_button(text, tooltip))
+    return get_macros().copy_button(text, tooltip)
 
 
 def _render_wrap_button(css_class: str) -> Markup:
@@ -145,7 +145,7 @@ def _render_wrap_button(css_class: str) -> Markup:
 
     Internal helper used by render_categories_wrap_button and render_columns_wrap_button.
     """
-    return Markup(get_macros().wrap_button(css_class))
+    return get_macros().wrap_button(css_class)
 
 
 def render_categories_wrap_button() -> Markup:
@@ -180,7 +180,7 @@ def render_muted_span(text: str) -> Markup:
     -------
     ``Markup`` HTML with muted styling
     """
-    return Markup(get_macros().muted_span(text))
+    return get_macros().muted_span(text)
 
 
 def render_filepath_span(path: str, style: str = "") -> Markup:
@@ -197,7 +197,7 @@ def render_filepath_span(path: str, style: str = "") -> Markup:
     -------
     ``Markup`` HTML for the filepath span.
     """
-    return Markup(get_macros().filepath_span(path, style))
+    return get_macros().filepath_span(path, style)
 
 
 def render_nested_content(html_content: str | Markup) -> Markup:
@@ -219,7 +219,7 @@ def render_nested_content(html_content: str | Markup) -> Markup:
     ``Markup`` HTML closing the summary and wrapping nested content.
     """
     body = html_content if isinstance(html_content, Markup) else Markup(html_content)
-    return Markup(get_macros().nested_content(body))
+    return get_macros().nested_content(body)
 
 
 def render_badge(
@@ -253,7 +253,7 @@ def render_badge(
     -------
     >>> badge = render_badge("Zarr", "anndata-badge--backed", "Backed by Zarr store")
     """
-    return Markup(get_macros().badge(text, variant, tooltip))
+    return get_macros().badge(text, variant, tooltip)
 
 
 def render_header_badges(
@@ -334,7 +334,7 @@ def render_name_cell(name: str) -> Markup:
     -------
     ``Markup`` HTML for the cell span.
     """
-    return Markup(get_macros().name_cell(name))
+    return get_macros().name_cell(name)
 
 
 def render_category_list(
@@ -371,7 +371,7 @@ def render_category_list(
 
     hidden_from_max_cats = max(0, len(categories) - max_cats)
     total_hidden = hidden_from_max_cats + n_hidden
-    return Markup(get_macros().category_list(items, total_hidden))
+    return get_macros().category_list(items, total_hidden)
 
 
 @dataclass
@@ -462,18 +462,16 @@ def render_entry_type_cell(config: TypeCellConfig) -> Markup:
     -------
     ``Markup`` HTML for the complete type cell.
     """
-    return Markup(
-        get_macros().type_cell(
-            type_name=config.type_name,
-            css_class=config.css_class,
-            type_markup=config.type_markup,
-            tooltip=config.tooltip,
-            all_warnings=config.warnings,
-            is_not_serializable=config.is_not_serializable,
-            has_columns_list=config.has_columns_list,
-            has_categories_list=config.has_categories_list,
-            append_type_markup=config.append_type_markup,
-        )
+    return get_macros().type_cell(
+        type_name=config.type_name,
+        css_class=config.css_class,
+        type_markup=config.type_markup,
+        tooltip=config.tooltip,
+        all_warnings=config.warnings,
+        is_not_serializable=config.is_not_serializable,
+        has_columns_list=config.has_columns_list,
+        has_categories_list=config.has_categories_list,
+        append_type_markup=config.append_type_markup,
     )
 
 
@@ -497,9 +495,7 @@ def render_entry_preview_cell(
     -------
     ``Markup`` HTML for the preview cell.
     """
-    return Markup(
-        get_macros().preview_cell(
-            preview_markup=preview_markup,
-            preview_text=preview_text,
-        )
+    return get_macros().preview_cell(
+        preview_markup=preview_markup,
+        preview_text=preview_text,
     )

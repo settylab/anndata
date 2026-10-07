@@ -840,9 +840,7 @@ class AnnDataFormatter(TypeFormatter[AnnData]):
                 show_header=True,
                 show_search=False,
             )
-            expanded_markup = Markup(
-                get_macros().nested_anndata_wrapper(Markup(nested_html))
-            )
+            expanded_markup = get_macros().nested_anndata_wrapper(nested_html)
 
         return FormattedOutput(
             type_name=f"{type(obj).__name__} ({shape_str})",
@@ -1006,16 +1004,14 @@ class ColorListFormatter(TypeFormatter[object]):
             safe_color = sanitize_css_color(label)
             if safe_color:
                 swatches.append(
-                    Markup(get_macros().color_swatch(safe_color, label, valid=True))
+                    get_macros().color_swatch(safe_color, label, valid=True)
                 )
             else:
                 invalid_count += 1
-                swatches.append(
-                    Markup(get_macros().color_swatch("", label, valid=False))
-                )
+                swatches.append(get_macros().color_swatch("", label, valid=False))
         overflow = max(0, n_colors - COLOR_PREVIEW_LIMIT)
 
-        preview_markup = Markup(get_macros().color_preview(swatches, overflow))
+        preview_markup = get_macros().color_preview(swatches, overflow)
 
         # Build warnings list (only for colors within preview limit)
         warnings = []
