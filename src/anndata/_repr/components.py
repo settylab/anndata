@@ -140,34 +140,6 @@ def render_copy_button(text: str, tooltip: str = "Copy") -> Markup:
     return get_macros().copy_button(text, tooltip)
 
 
-def _render_wrap_button(css_class: str) -> Markup:
-    """Render a wrap toggle button with the specified CSS class.
-
-    Internal helper used by render_categories_wrap_button and render_columns_wrap_button.
-    """
-    return get_macros().wrap_button(css_class)
-
-
-def render_categories_wrap_button() -> Markup:
-    """Render a button to toggle category list between single-line and multi-line.
-
-    Returns
-    -------
-    ``Markup`` HTML for the wrap button (▼ expands, ▲ collapses)
-    """
-    return _render_wrap_button("anndata-categories__wrap")
-
-
-def render_columns_wrap_button() -> Markup:
-    """Render a button to toggle column list between single-line and multi-line.
-
-    Returns
-    -------
-    ``Markup`` HTML for the wrap button (▼ expands, ▲ collapses)
-    """
-    return _render_wrap_button("anndata-columns__wrap")
-
-
 def render_muted_span(text: str) -> Markup:
     """Render text in a muted span (gray color).
 
