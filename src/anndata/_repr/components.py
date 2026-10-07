@@ -19,7 +19,12 @@ from dataclasses import dataclass, field
 
 from markupsafe import Markup
 
-from .._repr_constants import CSS_ENTRY
+from .._repr_constants import (
+    CSS_BADGE_BACKED,
+    CSS_BADGE_LAZY,
+    CSS_BADGE_VIEW,
+    CSS_ENTRY,
+)
 from .environment import get_macros
 from .utils import sanitize_css_color
 
@@ -258,9 +263,13 @@ def render_header_badges(
     is_lazy: bool = False,
     backing_path: str | None = None,
     backing_format: str | None = None,
+    is_open: bool | None = None,
 ) -> Markup:
     """
     Render standard header badges for view/backed/lazy status.
+
+    When the object is backed or lazy and ``backing_path`` is given, the path
+    is shown next to the badges.
 
     Parameters
     ----------
@@ -271,9 +280,11 @@ def render_header_badges(
     is_lazy
         Whether this uses lazy loading (experimental read_lazy)
     backing_path
-        Path to the backing file (for tooltip)
+        Path to the backing file
     backing_format
         Format of the backing file ("H5AD", "Zarr", etc.)
+    is_open
+        For backed objects: whether the backing file is open (``None``: unknown)
 
     Returns
     -------
@@ -290,20 +301,21 @@ def render_header_badges(
     parts: list[Markup] = []
     if is_view:
         parts.append(
-            render_badge(
-                "View", "anndata-badge--view", "This is a view of another object"
-            )
+            render_badge("View", CSS_BADGE_VIEW, "This is a view of another object")
         )
     if is_backed:
-        tooltip = f"Backed by {backing_path}" if backing_path else "Backed mode"
         label = backing_format or "Backed"
-        parts.append(render_badge(label, "anndata-badge--backed", tooltip))
+        if is_open is not None:
+            label += " (Open)" if is_open else " (Closed)"
+        tooltip = f"Backed by {backing_path}" if backing_path else "Backed mode"
+        parts.append(render_badge(label, CSS_BADGE_BACKED, tooltip))
     if is_lazy:
+        label = f"Lazy ({backing_format})" if backing_format else "Lazy"
         parts.append(
-            render_badge(
-                "Lazy", "anndata-badge--lazy", "Lazy loading (experimental read_lazy)"
-            )
+            render_badge(label, CSS_BADGE_LAZY, "Lazy loading (experimental read_lazy)")
         )
+    if (is_backed or is_lazy) and backing_path:
+        parts.append(get_macros().filepath_span(backing_path))
     return Markup("").join(parts)
 
 

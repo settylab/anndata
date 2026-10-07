@@ -7,16 +7,11 @@ custom formatter registration, and uns type hints.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 import pytest
 from markupsafe import Markup
 
 from anndata import AnnData
-
-if TYPE_CHECKING:
-    from typing import Any
 
 
 class TestFormatterRegistry:
@@ -43,10 +38,10 @@ class TestFormatterRegistry:
         class CustomTypeFormatter(TypeFormatter):
             priority = 500
 
-            def can_format(self, obj: Any, context) -> bool:
+            def can_format(self, obj, context):
                 return isinstance(obj, CustomType)
 
-            def format(self, obj: Any, context: FormatterContext) -> FormattedOutput:
+            def format(self, obj: object, context: FormatterContext) -> FormattedOutput:
                 return FormattedOutput(
                     type_name="CustomType",
                     css_class="anndata-dtype--custom",
@@ -104,10 +99,10 @@ class TestFormatterRegistry:
             priority = 600
             sections = ("uns",)
 
-            def can_format(self, obj: Any, context) -> bool:
+            def can_format(self, obj, context):
                 return isinstance(obj, SectionSpecificType)
 
-            def format(self, obj: Any, context: FormatterContext) -> FormattedOutput:
+            def format(self, obj: object, context: FormatterContext) -> FormattedOutput:
                 return FormattedOutput(
                     type_name="UnsSpecificType",
                     css_class="anndata-dtype--uns-specific",
@@ -146,10 +141,10 @@ class TestFormatterRegistry:
             priority = 600
             sections = None
 
-            def can_format(self, obj: Any, context) -> bool:
+            def can_format(self, obj, context):
                 return isinstance(obj, UniversalType)
 
-            def format(self, obj: Any, context: FormatterContext) -> FormattedOutput:
+            def format(self, obj: object, context: FormatterContext) -> FormattedOutput:
                 return FormattedOutput(type_name="UniversalType")
 
         formatter = UniversalFormatter()
@@ -923,3 +918,111 @@ class TestFormattedEntryRendering:
             assert "⚠" in html or "warning" in html.lower()
         finally:
             formatter_registry._section_formatters.pop("not_serializable_section", None)
+
+
+class TestRegistrationSemantics:
+    """Decorator return value, re-registration and unregistration."""
+
+    def test_decorator_returns_class(self):
+        """@register_formatter keeps the class bound to its name."""
+        from anndata._repr import TypeFormatter, register_formatter
+        from anndata._repr.registry import formatter_registry
+
+        @register_formatter
+        class Fmt(TypeFormatter):
+            def can_format(self, obj, context):
+                return False
+
+            def format(self, obj, context):
+                raise NotImplementedError
+
+        assert isinstance(Fmt, type)
+        assert any(type(f) is Fmt for f in formatter_registry._type_formatters)
+        assert formatter_registry.unregister_type_formatter(Fmt)
+        assert not any(type(f) is Fmt for f in formatter_registry._type_formatters)
+        assert not formatter_registry.unregister_type_formatter(Fmt)
+
+    def test_reregistering_replaces(self):
+        """Re-defining a formatter (e.g. re-running a cell) does not stack copies."""
+        from anndata._repr import TypeFormatter, register_formatter
+        from anndata._repr.registry import formatter_registry
+
+        def define():
+            @register_formatter
+            class RerunFormatter(TypeFormatter):
+                def can_format(self, obj, context):
+                    return False
+
+                def format(self, obj, context):
+                    raise NotImplementedError
+
+            return RerunFormatter
+
+        n_before = len(formatter_registry._type_formatters)
+        first, second = define(), define()
+        assert first is not second
+        registered = [
+            f
+            for f in formatter_registry._type_formatters
+            if type(f).__qualname__ == first.__qualname__
+        ]
+        assert len(registered) == 1
+        assert type(registered[0]) is second
+        assert len(formatter_registry._type_formatters) == n_before + 1
+
+    def test_unregister_section_formatter(self):
+        """Section formatters can be unregistered by name."""
+        from anndata._repr import SectionFormatter, register_formatter
+        from anndata._repr.registry import formatter_registry
+
+        @register_formatter
+        class Sec(SectionFormatter):
+            section_name = "_test_unregister"
+
+            def get_entries(self, obj, context):
+                return []
+
+        assert "_test_unregister" in formatter_registry.get_registered_sections()
+        assert formatter_registry.unregister_section_formatter("_test_unregister")
+        assert "_test_unregister" not in formatter_registry.get_registered_sections()
+        assert not formatter_registry.unregister_section_formatter("_test_unregister")
+
+    def test_error_takes_precedence_over_preview(self):
+        """A formatter's explicit error replaces its preview in the output."""
+        from anndata._repr import FormattedEntry, FormattedOutput
+        from anndata._repr.core import render_formatted_entry
+
+        html = render_formatted_entry(
+            FormattedEntry(
+                key="k",
+                output=FormattedOutput(
+                    type_name="T",
+                    preview_markup=Markup("<b>PREVIEW</b>"),
+                    error="it <broke>",
+                ),
+            )
+        )
+        assert "PREVIEW" not in html
+        assert "it &lt;broke&gt;" in html
+
+    def test_uns_restricted_formatter_applies_in_uns(self):
+        """A formatter with sections=("uns",) is used for uns entries only."""
+        from anndata._repr import FormattedOutput, TypeFormatter, register_formatter
+
+        @register_formatter
+        class UnsOnly(TypeFormatter):
+            priority = 1000
+            sections = ("uns",)
+
+            def can_format(self, obj, context):
+                return isinstance(obj, str) and obj == "MARK"
+
+            def format(self, obj, context):
+                return FormattedOutput(type_name="marked-by-uns-formatter")
+
+        adata = AnnData(np.zeros((2, 2)))
+        adata.uns["k"] = "MARK"
+        adata.obs["k"] = ["MARK", "MARK"]
+        html = adata._repr_html_()
+        assert html is not None
+        assert html.count("marked-by-uns-formatter") == 2  # data-dtype + label

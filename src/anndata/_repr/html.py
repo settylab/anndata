@@ -11,48 +11,37 @@ This module generates the complete HTML representation by:
 
 from __future__ import annotations
 
+import contextlib
 import re
 import uuid
 from typing import TYPE_CHECKING
 
 from markupsafe import Markup
 
+from .._core.anndata import AnnData
 from .._repr_constants import (
     CHAR_WIDTH_PX,
     COPY_BUTTON_PADDING_PX,
-    CSS_BADGE_BACKED,
     CSS_BADGE_EXTENSION,
-    CSS_BADGE_LAZY,
-    CSS_BADGE_VIEW,
     DEFAULT_FIELD_WIDTH_PX,
-    DEFAULT_MAX_README_SIZE,
     MIN_FIELD_WIDTH_PX,
     TOOLTIP_TRUNCATE_LENGTH,
 )
+from .._settings import settings
 from .._types import AnnDataElem
 from ..utils import get_literal_members
-from . import (
-    DEFAULT_FOLD_THRESHOLD,
-    DEFAULT_MAX_CATEGORIES,
-    DEFAULT_MAX_DEPTH,
-    DEFAULT_MAX_FIELD_WIDTH,
-    DEFAULT_MAX_ITEMS,
-    DEFAULT_MAX_LAZY_CATEGORIES,
-    DEFAULT_MAX_STRING_LENGTH,
-    DEFAULT_PREVIEW_ITEMS,
-    DEFAULT_TYPE_WIDTH,
-    DEFAULT_UNIQUE_LIMIT,
-)
 from . import (
     formatters as _formatters,  # noqa: F401  # side-effect: register built-in formatters
 )
 from .components import (
     render_badge,
-    render_filepath_span,
+    render_header_badges,
     render_search_box,
 )
 from .core import (
+    render_error_section,
     render_formatted_entry,
+    render_index_preview,
     render_section,
     render_truncation_indicator,
     render_x_entry,
@@ -68,26 +57,21 @@ from .registry import (
 from .sections import (
     _detect_unknown_sections,
     _render_dataframe_section,
-    _render_error_entry,
     _render_mapping_section,
     _render_raw_section,
     _render_unknown_sections,
     _render_uns_section,
 )
 from .utils import (
-    format_index_preview,
     format_memory_size,
     format_number,
     get_anndata_version,
     get_backing_info,
-    get_setting,
     is_backed,
     is_view,
 )
 
 if TYPE_CHECKING:
-    from anndata import AnnData
-
     from .registry import SectionFormatter
 
 
@@ -95,6 +79,11 @@ if TYPE_CHECKING:
 # (see javascript.py: `getElementById('{container_id}')`), so any
 # caller-supplied value must match this restrictive shape.
 _CONTAINER_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
+# Display order of the standard sections: the main matrix first, then the
+# annotations in the order of :data:`AnnDataElem`.
+_ELEMS: tuple[AnnDataElem, ...] = tuple(get_literal_members(AnnDataElem))
+_SECTION_ORDER: tuple[AnnDataElem, ...] = ("X", *(e for e in _ELEMS if e != "X"))
 
 
 def _collect_all_field_names(adata: AnnData) -> list[str]:
@@ -105,9 +94,9 @@ def _collect_all_field_names(adata: AnnData) -> list[str]:
     (uns, obsm, varm, layers, obsp, varp) plus any registered custom sections.
     """
     all_names: list[str] = []
-    standard_sections = set(get_literal_members(AnnDataElem))
+    standard_sections: set[str] = set(_SECTION_ORDER)
 
-    for section in get_literal_members(AnnDataElem):
+    for section in _SECTION_ORDER:
         if section in {"X", "raw"}:
             continue
         try:
@@ -118,7 +107,8 @@ def _collect_all_field_names(adata: AnnData) -> list[str]:
                 if hasattr(attr, "columns"):
                     all_names.extend(attr.columns.tolist())
             elif hasattr(attr, "keys"):
-                all_names.extend(attr.keys())
+                # skip `layers[None]`, which is `.X`
+                all_names.extend(k for k in attr if k is not None)
         except Exception:  # noqa: BLE001
             # Broken section — skip for width calculation, error placeholder is
             # rendered separately by _render_section.
@@ -160,23 +150,6 @@ def _calculate_field_name_width(adata: AnnData, max_width: int) -> int:
     return min(max(MIN_FIELD_WIDTH_PX, width_px), max_width)
 
 
-def _resolve_setting(override: int | None, setting_name: str, default: int) -> int:
-    """Resolve a setting value with priority: explicit override > anndata.settings > default.
-
-    Parameters
-    ----------
-    override
-        Explicit value passed to generate_repr_html (highest priority)
-    setting_name
-        Name of the anndata.settings attribute to check
-    default
-        Fallback default value (lowest priority)
-    """
-    if override is not None:
-        return override
-    return get_setting(setting_name, default=default)
-
-
 def _create_formatter_context(
     adata: AnnData,
     *,
@@ -186,34 +159,22 @@ def _create_formatter_context(
     max_items: int | None = None,
     max_lazy_categories: int | None = None,
 ) -> FormatterContext:
-    """Create a FormatterContext with settings resolution.
+    """Create a FormatterContext, using explicit overrides where given and settings otherwise."""
 
-    Parameters with function overrides use _resolve_setting() (override > settings > default).
-    Settings-only parameters use get_setting() directly (settings > default).
-    """
+    def resolve(override: int | None, setting: int) -> int:
+        return setting if override is None else override
+
     return FormatterContext(
         depth=depth,
-        # Overridable parameters (passed to generate_repr_html)
-        max_depth=_resolve_setting(max_depth, "repr_html_max_depth", DEFAULT_MAX_DEPTH),
-        fold_threshold=_resolve_setting(
-            fold_threshold, "repr_html_fold_threshold", DEFAULT_FOLD_THRESHOLD
+        max_depth=resolve(max_depth, settings.repr_html_max_depth),
+        fold_threshold=resolve(fold_threshold, settings.repr_html_fold_threshold),
+        max_items=resolve(max_items, settings.repr_html_max_items),
+        max_lazy_categories=resolve(
+            max_lazy_categories, settings.repr_html_max_lazy_categories
         ),
-        max_items=_resolve_setting(max_items, "repr_html_max_items", DEFAULT_MAX_ITEMS),
-        max_lazy_categories=_resolve_setting(
-            max_lazy_categories,
-            "repr_html_max_lazy_categories",
-            DEFAULT_MAX_LAZY_CATEGORIES,
-        ),
-        # Settings-only parameters (not overridable at call time)
-        max_categories=get_setting(
-            "repr_html_max_categories", default=DEFAULT_MAX_CATEGORIES
-        ),
-        max_string_length=get_setting(
-            "repr_html_max_string_length", default=DEFAULT_MAX_STRING_LENGTH
-        ),
-        unique_limit=get_setting(
-            "repr_html_unique_limit", default=DEFAULT_UNIQUE_LIMIT
-        ),
+        max_categories=settings.repr_html_max_categories,
+        max_string_length=settings.repr_html_max_string_length,
+        unique_limit=settings.repr_html_unique_limit,
         adata_ref=adata,
     )
 
@@ -260,7 +221,7 @@ def generate_repr_html(  # noqa: PLR0913
     HTML string
     """
     # Check if HTML repr is enabled
-    if not get_setting("repr_html_enabled", default=True):
+    if not settings.repr_html_enabled:
         return Markup(get_macros().pre_fallback(repr(adata)))
 
     # Create formatter context (resolves settings)
@@ -293,13 +254,8 @@ def generate_repr_html(  # noqa: PLR0913
         container_id = f"anndata-repr-{uuid.uuid4().hex[:8]}"
 
     # Calculate field name column width based on content
-    max_field_width = get_setting(
-        "repr_html_max_field_width", default=DEFAULT_MAX_FIELD_WIDTH
-    )
-    field_width = _calculate_field_name_width(adata, max_field_width)
-
-    # Get type column width from settings
-    type_width = get_setting("repr_html_type_width", default=DEFAULT_TYPE_WIDTH)
+    field_width = _calculate_field_name_width(adata, settings.repr_html_max_field_width)
+    type_width = settings.repr_html_type_width
 
     # Computed column widths as CSS variables. Inline font-family:monospace
     # provides a readable fallback when CSS is stripped (GitHub, untrusted
@@ -324,7 +280,7 @@ def generate_repr_html(  # noqa: PLR0913
     css_html: Markup | None = None
     javascript_html: Markup | None = None
     if depth == 0:
-        index_preview_markup = _render_index_preview(adata)
+        index_preview_markup = render_index_preview(adata)
         footer_html = _render_footer(adata)
         hints_html = _render_hints()
         css_html = Markup(get_css())
@@ -356,7 +312,7 @@ def _render_all_sections(
     parts: list[Markup] = []
     custom_sections_after = _get_custom_sections_by_position(adata)
 
-    for section in get_literal_members(AnnDataElem):
+    for section in _SECTION_ORDER:
         parts.append(_render_section(adata, section, context))
 
         # Render custom sections after this section
@@ -392,7 +348,7 @@ def _render_section(
     whose ``getattr`` raises — e.g. a corrupt aligned mapping or a subclass
     with a crashing property) renders as an error placeholder instead of
     aborting the whole repr. This is why we iterate section names directly
-    via ``get_literal_members(AnnDataElem)`` rather than delegating to
+    via ``_SECTION_ORDER`` rather than delegating to
     ``iter_outer``, which propagates the first exception it hits.
     """
     try:
@@ -408,7 +364,7 @@ def _render_section(
         return _render_mapping_section(section, elem, context)
     except Exception as e:  # noqa: BLE001
         # Show error instead of hiding the section
-        return _render_error_entry(section, f"{type(e).__name__}: {e}")
+        return render_error_section(section, f"{type(e).__name__}: {e}")
 
 
 def _get_custom_sections_by_position(
@@ -423,7 +379,7 @@ def _get_custom_sections_by_position(
     from collections import defaultdict
 
     result = defaultdict(list)
-    standard_section_names = set(get_literal_members(AnnDataElem))
+    standard_section_names: set[str] = set(_SECTION_ORDER)
 
     for section_name in formatter_registry.get_registered_sections():
         formatter = formatter_registry.get_section_formatter(section_name)
@@ -476,13 +432,15 @@ def _render_custom_section(
     try:
         entries = formatter.get_entries(adata, context)
     except Exception as e:  # noqa: BLE001
+        # Intentional broad catch: custom formatters shouldn't crash the entire
+        # repr. Show the failure like for built-in sections, and warn for debugging.
         from .._warnings import warn
 
         warn(
             f"Custom section formatter '{formatter.section_name}' failed: {e}",
             UserWarning,
         )
-        return Markup("")
+        return render_error_section(formatter.section_name, f"{type(e).__name__}: {e}")
 
     if not entries:
         return Markup("")
@@ -519,9 +477,7 @@ def _build_readme_icon(adata: AnnData) -> Markup | None:
     if not (isinstance(readme_content, str) and readme_content.strip()):
         return None
 
-    max_readme_size = get_setting(
-        "repr_html_max_readme_size", default=DEFAULT_MAX_README_SIZE
-    )
+    max_readme_size = settings.repr_html_max_readme_size
     original_len = len(readme_content)
     if max_readme_size > 0 and original_len > max_readme_size:
         readme_content = readme_content[:max_readme_size]
@@ -552,39 +508,42 @@ def _render_header(
     type_name = type(adata).__name__
     shape_str = f"{format_number(adata.n_obs)} obs × {format_number(adata.n_vars)} vars"
 
-    # `extras` preserves the original interleaving: badges and their associated
-    # filepath spans ship in the same list, in insertion order.
-    extras: list[Markup] = []
-
-    if is_view(adata):
-        extras.append(render_badge("View", CSS_BADGE_VIEW))
-
-    if is_backed(adata):
+    # View / backed / lazy badges and backing file path
+    backed = is_backed(adata)
+    lazy = is_lazy_adata(adata)
+    backing_path = backing_format = None
+    is_open = None
+    if backed:
         backing = get_backing_info(adata)
-        filename = backing.get("filename", "")
-        format_str = backing.get("format", "")
-        status = "Open" if backing.get("is_open") else "Closed"
-        extras.append(render_badge(f"{format_str} ({status})", CSS_BADGE_BACKED))
-        if filename:
-            extras.append(render_filepath_span(filename))
-
-    if is_lazy_adata(adata):
+        backing_path = str(backing.get("filename") or "")
+        backing_format = str(backing.get("format") or "")
+        is_open = bool(backing.get("is_open"))
+    elif lazy:
         lazy_info = get_lazy_backing_info(adata)
-        lazy_format = lazy_info.get("format", "")
-        if lazy_format:
-            extras.append(render_badge(f"Lazy ({lazy_format})", CSS_BADGE_LAZY))
-        else:
-            extras.append(render_badge("Lazy", CSS_BADGE_LAZY))
-        lazy_filename = lazy_info.get("filename", "")
-        if lazy_filename:
-            path_style = (
-                "font-family:ui-monospace,monospace;font-size:11px;"
-                "color:var(--anndata-text-secondary, #6c757d);"
-            )
-            extras.append(render_filepath_span(lazy_filename, path_style))
+        backing_path = lazy_info.get("filename", "")
+        backing_format = lazy_info.get("format", "")
+    extras: list[Markup] = [
+        render_header_badges(
+            is_view=is_view(adata),
+            is_backed=backed,
+            is_lazy=lazy,
+            backing_path=backing_path,
+            backing_format=backing_format,
+            is_open=is_open,
+        )
+    ]
 
-    if type_name != "AnnData":
-        extras.append(render_badge(type_name, CSS_BADGE_EXTENSION))
+    # Mark AnnData subclasses (the type name itself is already shown above).
+    # AnnData-like containers (e.g. MuData) only duck-type, so they get no badge.
+    if type_name != "AnnData" and isinstance(adata, AnnData):
+        cls = type(adata)
+        extras.append(
+            render_badge(
+                "AnnData subclass",
+                CSS_BADGE_EXTENSION,
+                f"{cls.__module__}.{cls.__qualname__}",
+            )
+        )
 
     readme_icon = _build_readme_icon(adata)
     if readme_icon is not None:
@@ -605,28 +564,27 @@ def _render_header(
 
 
 def _render_footer(adata: AnnData) -> Markup:
-    """Render the footer with version and memory info."""
-    try:
-        memory_str: str | None = format_memory_size(adata.__sizeof__())
-    except Exception:  # noqa: BLE001
+    """Render the footer with version and memory info.
+
+    The memory estimate is omitted for lazy AnnData, where everything stays on
+    disk and ``__sizeof__`` would only count a few in-memory wrappers.
+    """
+    memory_str: str | None = None
+    memory_title = "Estimated memory usage"
+    if not is_lazy_adata(adata):
         # __sizeof__ recurses into user data which can raise anything
-        memory_str = None
+        with contextlib.suppress(Exception):
+            memory_str = format_memory_size(adata.__sizeof__())
+        if is_backed(adata):
+            memory_title = "Estimated in-memory size (data on disk not included)"
 
     return Markup(
         get_env()
         .get_template("footer.j2")
-        .render(version=get_anndata_version(), memory_str=memory_str)
-    )
-
-
-def _render_index_preview(adata: AnnData) -> Markup:
-    """Render preview of obs_names and var_names."""
-    return Markup(
-        get_env()
-        .get_template("index_preview.j2")
         .render(
-            obs_preview=format_index_preview(adata.obs_names, DEFAULT_PREVIEW_ITEMS),
-            var_preview=format_index_preview(adata.var_names, DEFAULT_PREVIEW_ITEMS),
+            version=get_anndata_version(),
+            memory_str=memory_str,
+            memory_title=memory_title,
         )
     )
 

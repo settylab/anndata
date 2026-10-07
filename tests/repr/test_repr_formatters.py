@@ -212,28 +212,32 @@ class TestSparseFormatters:
             "sparse" not in result.type_name.lower() or "stored" not in result.type_name
         )
 
-    def test_sparse_formatter_duck_typing_fallback(self):
-        """Test sparse formatter uses duck typing when scipy checks fail."""
+    @pytest.mark.parametrize(
+        ("make", "expected"),
+        [
+            pytest.param(sp.csr_matrix, "csr_matrix", id="csr_matrix"),
+            pytest.param(sp.csc_array, "csc_array", id="csc_array"),
+            pytest.param(sp.coo_matrix, "coo_matrix", id="coo_matrix"),
+        ],
+    )
+    def test_sparse_formatter_format_name(self, make, expected):
+        """The label reflects storage format and matrix/array kind."""
         from anndata._repr.formatters import SparseMatrixFormatter
         from anndata._repr.registry import FormatterContext
 
-        class MockSparseArray:
-            def __init__(self):
-                self.nnz = 10
-                self.shape = (5, 5)
-                self.dtype = np.float64
+        result = SparseMatrixFormatter().format(
+            make(np.eye(4, dtype=np.float32)), FormatterContext()
+        )
+        assert result.type_name.startswith(f"{expected} (4 × 4) float32")
+        assert "75.0% sparse" in result.type_name
 
-            def tocsr(self):
-                pass
-
-        MockSparseArray.__module__ = "scipy.sparse._csr"
-
-        formatter = SparseMatrixFormatter()
-        mock_sparse = MockSparseArray()
-
-        assert formatter.can_format(mock_sparse, FormatterContext())
-        result = formatter.format(mock_sparse, FormatterContext())
-        assert "MockSparseArray" in result.type_name
+    def test_sparse_view_named_by_format(self):
+        """Views of sparse X are labeled by format, not by their view class."""
+        adata = AnnData(sp.random(20, 10, density=0.2, format="csr"))
+        html = adata[:5]._repr_html_()
+        assert html is not None
+        assert "csr_matrix (5 × 10)" in html
+        assert "SparseCSRMatrixView" not in html
 
 
 class TestPandasFormatters:
@@ -471,15 +475,18 @@ class TestSpecialArrayFormatters:
         """Test Awkward array formatter with a mock object."""
         from anndata._repr.formatters import AwkwardArrayFormatter
         from anndata._repr.registry import FormatterContext
+        from anndata.compat import AwkArray
 
-        class MockAwkwardArray:
-            def __init__(self):
-                self.type = "var * int64"
+        class MockAwkwardArray(AwkArray):
+            def __init__(self):  # skip awkward's constructor
+                pass
+
+            @property
+            def type(self):
+                return "var * int64"
 
             def __len__(self):
                 return 100
-
-        MockAwkwardArray.__module__ = "awkward.highlevel"
 
         formatter = AwkwardArrayFormatter()
         mock_arr = MockAwkwardArray()
@@ -496,8 +503,12 @@ class TestSpecialArrayFormatters:
         """Test Awkward array formatter handles exceptions."""
         from anndata._repr.formatters import AwkwardArrayFormatter
         from anndata._repr.registry import FormatterContext
+        from anndata.compat import AwkArray
 
-        class BrokenAwkwardArray:
+        class BrokenAwkwardArray(AwkArray):
+            def __init__(self):  # skip awkward's constructor
+                pass
+
             @property
             def type(self):
                 msg = "Cannot get type"
@@ -506,8 +517,6 @@ class TestSpecialArrayFormatters:
             def __len__(self):
                 msg = "Cannot get length"
                 raise RuntimeError(msg)
-
-        BrokenAwkwardArray.__module__ = "awkward.highlevel"
 
         formatter = AwkwardArrayFormatter()
         mock_arr = BrokenAwkwardArray()
@@ -1067,3 +1076,95 @@ class TestObsmVarmPreviewConsistency:
         result = formatter.format(arr, FormatterContext(section="obsm"))
         # format_number adds thousands separators
         assert "12,345" in result.preview or "12345" in result.preview
+
+
+class TestScalarAndObjectEdgeCases:
+    """Regressions found with the visual inspection page."""
+
+    @pytest.mark.parametrize(
+        ("value", "type_name", "preview"),
+        [
+            pytest.param(np.float32(1.5), "float", "1.5", id="np.float32"),
+            pytest.param(np.int64(3), "int", "3", id="np.int64"),
+            pytest.param(float("nan"), "float", "nan", id="nan"),
+            pytest.param(-np.inf, "float", "-inf", id="-inf"),
+        ],
+    )
+    def test_uns_scalars(self, value, type_name, preview):
+        """numpy scalars are scalars (not array-API arrays); nan/inf don't crash."""
+        from anndata._repr.registry import FormatterContext, formatter_registry
+
+        out = formatter_registry.format_value(
+            value, FormatterContext(section="uns", key="k")
+        )
+        assert out.type_name == type_name
+        assert out.preview == preview
+        assert out.error is None
+
+    @pytest.mark.parametrize(
+        "values", [[1, "a", None, 2.5], [1, 2, None, 3]], ids=["mixed", "ints"]
+    )
+    def test_object_column_with_non_strings_warns(self, values):
+        """Object columns with non-string values cannot be written to h5ad."""
+        adata = AnnData(np.zeros((4, 2)))
+        adata.obs["m"] = pd.Series(values, index=adata.obs_names, dtype=object)
+        html = adata._repr_html_()
+        assert html is not None
+        assert "write_h5ad fails" in html
+
+    def test_object_string_column_no_h5ad_warning(self):
+        adata = AnnData(np.zeros((4, 2)))
+        adata.obs["s"] = pd.Series(
+            ["a", None, "b", "c"], index=adata.obs_names, dtype=object
+        )
+        html = adata._repr_html_()
+        assert html is not None
+        assert "write_h5ad fails" not in html
+
+    def test_color_array_from_disk_is_colors(self):
+        """Colors read back from disk are string arrays, still shown as colors."""
+        adata = AnnData(np.zeros((3, 2)))
+        adata.obs["c"] = pd.Categorical(["a", "b", "a"])
+        adata.uns["c_colors"] = np.array(["#ff0000", "#00ff00"], dtype=object)
+        html = adata._repr_html_()
+        assert html is not None
+        assert "colors (2)" in html
+        assert "anndata-colors__swatch" in html
+
+    @pytest.mark.skipif(not HAS_DASK, reason="dask not installed")
+    def test_dask_sparse_chunks_marked(self):
+        import dask.array as da
+
+        adata = AnnData(np.zeros((10, 4)))
+        adata.obsm["d"] = da.from_array(
+            sp.random(10, 6, density=0.5, format="csr"), chunks=(5, 6)
+        )
+        html = adata._repr_html_()
+        assert html is not None
+        assert "dask.array (10 × 6) float64 · sparse chunks" in html
+
+    def test_subclass_badge_not_duplicating_name(self):
+        class MySubclass(AnnData):
+            pass
+
+        html = MySubclass(np.zeros((2, 2)))._repr_html_()
+        assert html is not None
+        assert "AnnData subclass" in html
+        assert html.count(">MySubclass<") == 1
+
+    def test_no_subclass_badge_for_duck_typed_containers(self):
+        """AnnData-like containers (e.g. MuData) aren't labeled as subclasses."""
+        from anndata._repr import generate_repr_html
+
+        class Container:
+            n_obs, n_vars = 2, 2
+            obs_names = var_names = pd.Index(["a", "b"])
+            X = None
+
+            @property
+            def uns(self):
+                return {}
+
+        html = generate_repr_html(Container())
+        assert "AnnData subclass" not in html
+        assert ">Container<" in html

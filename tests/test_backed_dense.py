@@ -10,23 +10,19 @@ import pytest
 import zarr
 
 from anndata import AnnData
-from anndata._io.zarr import open_write_group
 from anndata.io import write_elem
-from anndata.tests.helpers import assert_equal
+from anndata.tests.helpers import assert_equal, open_store
 
 if TYPE_CHECKING:
     from pathlib import Path
     from typing import Literal
 
+    from zarr.storage import MemoryStore
+
 
 @pytest.fixture
-def file(tmp_path: Path, diskfmt: Literal["h5ad", "zarr"]) -> h5py.File | zarr.Group:
-    path = tmp_path / f"test.{diskfmt}"
-    if diskfmt == "zarr":
-        return open_write_group(path, mode="a")
-    if diskfmt == "h5ad":
-        return h5py.File(path, "a")
-    pytest.fail(f"Unknown diskfmt: {diskfmt}")
+def file(diskfmt_store: Path | MemoryStore) -> h5py.File | zarr.Group:
+    return open_store(diskfmt_store)
 
 
 @pytest.mark.parametrize("assign", ["init", "assign"])
@@ -74,13 +70,19 @@ def test_create_delete(
         del getattr(adata, attr)["a"]
 
 
-def test_assign_x_subset(file: h5py.File | zarr.Group):
+@pytest.mark.parametrize(
+    "num_indexing_ops", [1, 2], ids=["single_index", "double_index"]
+)
+def test_assign_x_subset(file: h5py.File | zarr.Group, num_indexing_ops: Literal[1, 2]):
     x = np.ones((10, 10))
     write_elem(file, "a", x)
 
     adata = AnnData(file["a"])
-
-    view = adata[3:7, 6:8]
+    if num_indexing_ops == 1:
+        view = adata[3:7, 6:8]  # (3 : 7-3=4), (6 : 8-6=2)
+    else:
+        view = adata[2:8, 1:8]  # first a wider window …
+        view = view[1:5, 5:7]  # (2+1=3 : 5-1=4), (1+5=6 : 7-5=2)
     view.X = np.zeros((4, 2))
 
     expected = x.copy()

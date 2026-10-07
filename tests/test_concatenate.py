@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Hashable
+from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial, singledispatch
 from importlib.metadata import version
@@ -297,7 +298,7 @@ def test_concatenate_dense():
     assert_equal(adata.layers["Xs"], X_combined)
     assert adata.obs.columns.tolist() == ["batch"]
     assert adata.var.columns.tolist() == ["annoA", "annoB"]
-    assert adata.var.values.tolist() == [[1, 2], [2, 1]]
+    assert adata.var.to_numpy().tolist() == [[1, 2], [2, 1]]
     assert adata.obsm.keys() == {"X_1", "X_2"}
     assert adata.obsm["X_1"].tolist() == np.concatenate([X1, X1, X1]).tolist()
 
@@ -319,7 +320,7 @@ def test_concatenate_dense():
         [np.nan, 6.0, 5.0, 4.0],
     ])
     np.testing.assert_equal(adata.X, X_ref)
-    var_ma = ma.masked_invalid(adata.var.values.tolist())
+    var_ma = ma.masked_invalid(adata.var.to_numpy().tolist())
     var_ma_ref = ma.masked_invalid(
         np.array([
             [0.0, np.nan],
@@ -1400,7 +1401,7 @@ def test_bool_promotion():
     result = concat({"np_bool": np_bool, "b": missing}, join="outer", label="batch")
 
     assert pd.api.types.is_bool_dtype(result.obs["bool"])
-    assert pd.isnull(result.obs.loc[result.obs["batch"] == "missing", "bool"]).all()
+    assert pd.isna(result.obs.loc[result.obs["batch"] == "missing", "bool"]).all()
 
     # Check that promotion doesn't occur if it doesn't need to:
     np_bool_2 = AnnData(
@@ -1414,6 +1415,25 @@ def test_bool_promotion():
     )
 
     assert result.obs["bool"].dtype == np.dtype(bool)
+
+
+def test_bool_promotion_alt_axis(tmp_path):
+    # https://github.com/scverse/anndata/issues/1505
+    # Outer join with a union merge strategy reindexes alt-axis annotations,
+    # which promoted numpy bool columns to object and made the result unwritable.
+    a = AnnData(
+        np.ones((3, 2)),
+        var=pd.DataFrame({"bool": [True, False]}, index=["g1", "g2"]),
+    )
+    b = AnnData(
+        np.ones((3, 2)),
+        var=pd.DataFrame({"bool": [True, True]}, index=["g2", "g3"]),
+    )
+    result = concat([a, b], join="outer", merge="first")
+
+    assert pd.api.types.is_bool_dtype(result.var["bool"])
+    assert pd.isna(result.var.loc["g3", "bool"])
+    result.write_h5ad(tmp_path / "result.h5ad")
 
 
 @pytest.mark.parametrize(
@@ -1445,9 +1465,10 @@ def test_concat_names(
     cat = concat(
         [lhs, rhs], axis=axis_name, index_unique=index_unique, force_lazy=force_lazy
     )
-    assert get_annot(cat).index[~get_annot(cat).index.isna()].is_unique is expect_unique
+    idx = get_annot(cat).index
+    assert idx[idx.notna()].is_unique is expect_unique
     if with_missing:
-        assert get_annot(cat).index.isna().sum() == 10
+        assert np.count_nonzero(idx.isna()) == 10
 
 
 def axis_labels(adata: AnnData, axis: Literal[0, 1]) -> pd.Index:
@@ -1457,9 +1478,9 @@ def axis_labels(adata: AnnData, axis: Literal[0, 1]) -> pd.Index:
 def expected_shape(
     a: AnnData, b: AnnData, axis: Literal[0, 1], join: Join_T
 ) -> tuple[int, int]:
-    alt_axis = 1 - axis
+    alt_axis: Literal[0, 1] = 0 if axis == 1 else 1
     labels = partial(axis_labels, axis=alt_axis)
-    shape = [None, None]
+    shape = [0, 0]
 
     shape[axis] = a.shape[axis] + b.shape[axis]
     if join == "inner":
@@ -1469,7 +1490,7 @@ def expected_shape(
     else:
         raise ValueError()
 
-    return tuple(shape)
+    return shape[0], shape[1]
 
 
 @pytest.mark.parametrize(
@@ -1599,7 +1620,12 @@ def test_concatenate_size_0_axis():
     assert concat([a, b]).shape == (10, 0)
 
 
-def test_concat_null_X(use_xdataset):
+@pytest.mark.parametrize(
+    ("all_none", "implicit_join"),
+    [(True, False), (False, False), (False, True)],
+    ids=["all_none", "some_none", "some_none-warn"],
+)
+def test_concat_null_X(*, use_xdataset: bool, all_none: bool, implicit_join: bool):
     adatas_orig = {
         k: gen_adata((20, 10), obs_xdataset=use_xdataset, var_xdataset=use_xdataset)
         for k in list("abc")
@@ -1607,11 +1633,21 @@ def test_concat_null_X(use_xdataset):
     adatas_no_X = {}
     for k, v in adatas_orig.items():
         v = v.copy()
-        del v.X
+        if k == "a" or all_none:
+            del v.X
         adatas_no_X[k] = v
 
     orig = concat(adatas_orig, index_unique="-")
-    no_X = concat(adatas_no_X, index_unique="-")
+    with (
+        pytest.warns(UserWarning, match=r"Some Xs are None")
+        if not all_none and implicit_join
+        else nullcontext()
+    ):
+        no_X = (
+            concat(adatas_no_X, index_unique="-")
+            if implicit_join
+            else concat(adatas_no_X, index_unique="-", join="inner")
+        )
     del orig.X
 
     assert_equal(no_X, orig)
@@ -1814,22 +1850,63 @@ def test_concat_on_var_outer_join(array_type):
     _ = concat([a, b], join="outer", axis=1)
 
 
-def test_concat_dask_sparse_matches_memory(join_type, merge_strategy):
+@pytest.mark.parametrize("format", ["csr", "csc"])
+@pytest.mark.parametrize(
+    "unchunked_minor_axis", [True, False], ids=["unchunked_minor", "chunked_minor"]
+)
+@pytest.mark.parametrize("fill_value", [0, -1])
+def test_concat_dask_sparse_matches_memory(
+    join_type,
+    merge_strategy,
+    format: Literal["csr", "csc"],
+    axis_name: Literal["obs", "var"],
+    fill_value: Literal[-1, 0],
+    *,
+    unchunked_minor_axis: bool,
+):
     import dask.array as da
 
-    X = sparse.random(50, 20, density=0.5, format="csr")
-    X_dask = da.from_array(X, chunks=(5, 20))
-    var_names_1 = [f"gene_{i}" for i in range(20)]
-    var_names_2 = [f"gene_{i}{'_foo' if (i % 2) else ''}" for i in range(20)]
+    X = sparse.random(50, 20, density=0.5, format=format)
+    X_dask = da.from_array(
+        X,
+        chunks=(
+            X.shape[0] if format == "csc" else 10,
+            X.shape[1] if format == "csr" else 5,
+        )
+        if unchunked_minor_axis
+        else (5, 10),
+    )
+    off_axis_idx = int(axis_name == "obs")
+    concat_axis_idx: Literal[0, 1] = 1 if axis_name == "var" else 0
+    off_axis = "var" if axis_name == "obs" else "obs"
+    axis_names_1 = [f"off_axis_{i}" for i in range(X.shape[off_axis_idx])]
+    axis_names_2 = [
+        f"off_axis_{i}{'_foo' if (i % 2) else ''}" for i in range(X.shape[off_axis_idx])
+    ]
 
-    ad1 = AnnData(X=X, var=pd.DataFrame(index=var_names_1))
-    ad2 = AnnData(X=X, var=pd.DataFrame(index=var_names_2))
+    def annot(names: list[str]) -> dict[str, Any]:
+        return {off_axis: pd.DataFrame(index=names)}
 
-    ad1_dask = AnnData(X=X_dask, var=pd.DataFrame(index=var_names_1))
-    ad2_dask = AnnData(X=X_dask, var=pd.DataFrame(index=var_names_2))
+    ad1 = AnnData(X=X, **annot(axis_names_1))
+    ad2 = AnnData(X=X, **annot(axis_names_2))
 
-    res_in_memory = concat([ad1, ad2], join=join_type, merge=merge_strategy)
-    res_dask = concat([ad1_dask, ad2_dask], join=join_type, merge=merge_strategy)
+    ad1_dask = AnnData(X=X_dask, **annot(axis_names_1))
+    ad2_dask = AnnData(X=X_dask, **annot(axis_names_2))
+
+    res_in_memory = concat(
+        [ad1, ad2],
+        join=join_type,
+        merge=merge_strategy,
+        axis=concat_axis_idx,
+        fill_value=fill_value,
+    )
+    res_dask = concat(
+        [ad1_dask, ad2_dask],
+        join=join_type,
+        merge=merge_strategy,
+        axis=concat_axis_idx,
+        fill_value=fill_value,
+    )
     assert_equal(res_in_memory, res_dask)
 
 

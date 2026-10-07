@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 import numpy as np
+import pandas as pd
 import zarr
 from dask.array.core import Array as DaskArray
 from scipy import sparse
@@ -11,6 +13,9 @@ from anndata import AnnData, concat
 from anndata._core.sparse_dataset import sparse_dataset
 from anndata._io.specs import write_elem
 from anndata.experimental import read_elem_lazy
+
+if TYPE_CHECKING:
+    from typing import Literal
 
 
 def make_alternating_mask(n):
@@ -54,6 +59,8 @@ class SparseCSRContiguousSlice:
 
     def setup(self, index: str, use_dask: bool):  # noqa: FBT001
         g = zarr.open(self.filepath)
+        assert isinstance(g, zarr.Group), g
+        assert isinstance(g["X"], zarr.Group), g["X"]
         self.x = read_elem_lazy(g["X"]) if use_dask else sparse_dataset(g["X"])
         self.adata = AnnData(self.x)
         self.index = self._indexers[index]
@@ -79,6 +86,57 @@ class SparseCSRContiguousSlice:
             res.compute()
 
 
+class SparseCSRDaskConcat:
+    filepath = "data.zarr"
+
+    params = (["inner", "outer"], [0, -1])
+    param_names = ("join", "fill_value")
+
+    def setup_cache(self):
+        X = sparse.random(
+            10_000,
+            10_000,
+            density=0.01,
+            format="csr",
+            random_state=np.random.default_rng(42),
+        )
+        g = zarr.group(self.filepath)
+        write_elem(g, "X", X)
+
+    def setup(self, *_):
+        self.group = zarr.group(self.filepath)
+        self.adatas = [
+            AnnData(
+                var=pd.DataFrame(
+                    index=[
+                        f"gene_{j}{f'_{i}' if (j % 500 == 0) else ''}"
+                        for j in range(10_000)
+                    ]
+                ),
+                X=read_elem_lazy(self.group["X"]),
+            )
+            for i in range(5)
+        ]
+
+    def time_concat(self, join: Literal["inner", "outer"], fill_value: Literal[0, -1]):
+        concat(self.adatas, join=join, fill_value=fill_value)
+
+    def peakmem_concat(
+        self, join: Literal["inner", "outer"], fill_value: Literal[0, -1]
+    ):
+        concat(self.adatas, join=join, fill_value=fill_value)
+
+    def time_concat_with_mem(
+        self, join: Literal["inner", "outer"], fill_value: Literal[0, -1]
+    ):
+        concat(self.adatas, join=join, fill_value=fill_value).to_memory()
+
+    def peakmem_concat_with_mem(
+        self, join: Literal["inner", "outer"], fill_value: Literal[0, -1]
+    ):
+        concat(self.adatas, join=join, fill_value=fill_value).to_memory()
+
+
 class SparseCSRDask:
     filepath = "data.zarr"
 
@@ -93,18 +151,11 @@ class SparseCSRDask:
         g = zarr.group(self.filepath)
         write_elem(g, "X", X)
 
-    def setup(self):
+    def setup(self, *_):
         self.group = zarr.group(self.filepath)
-        self.adata = AnnData(X=read_elem_lazy(self.group["X"]))
 
-    def time_concat(self):
-        concat([self.adata for i in range(100)])
-
-    def peakmem_concat(self):
-        concat([self.adata for i in range(100)])
-
-    def time_read(self):
+    def time_read(self, *_):
         AnnData(X=read_elem_lazy(self.group["X"]))
 
-    def peakmem_read(self):
+    def peakmem_read(self, *_):
         AnnData(X=read_elem_lazy(self.group["X"]))

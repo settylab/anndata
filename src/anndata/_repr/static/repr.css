@@ -21,8 +21,10 @@
         color: var(--anndata-text-muted);
     }
 
-    /* Opt into light-dark(): responds to used color scheme, defaulting to light */
-    color-scheme: light dark;
+    /* light-dark() follows the used color scheme, which is inherited from the
+       page: light unless the page declares `color-scheme` (e.g. `light dark` to
+       follow the OS). Deliberately not declared here, so the repr never turns
+       dark on a light page just because the OS is in dark mode. */
 
     /* --- Theme overrides ---
        When an app explicitly sets a theme, override the color scheme so
@@ -34,7 +36,9 @@
     [data-jp-theme-light="true"] &,
     .jp-Theme-Light &,
     body.vscode-light &,
-    body[data-vscode-theme-kind="vscode-light"] & {
+    body.vscode-high-contrast-light &,
+    body[data-vscode-theme-kind="vscode-light"] &,
+    body[data-vscode-theme-kind="vscode-high-contrast-light"] & {
         color-scheme: light;
     }
 
@@ -44,8 +48,17 @@
     [data-jp-theme-light="false"] &,
     .jp-Theme-Dark &,
     body.vscode-dark &,
-    body[data-vscode-theme-kind="vscode-dark"] & {
+    body.vscode-high-contrast:not(.vscode-high-contrast-light) &,
+    body[data-vscode-theme-kind="vscode-dark"] &,
+    body[data-vscode-theme-kind="vscode-high-contrast"] & {
         color-scheme: dark;
+    }
+
+    /* Themes in "auto" mode (e.g. Furo) follow the OS preference */
+    @media (prefers-color-scheme: dark) {
+        [data-theme="auto"] & {
+            color-scheme: dark;
+        }
     }
 
     /* CSS Variables — each defined once via light-dark(light, dark) */
@@ -615,7 +628,8 @@
     }
 
     /* Reserve space for the expand indicator */
-    details.anndata-entry > summary.anndata-entry__summary
+    details.anndata-entry
+        > summary.anndata-entry__summary
         > .anndata-entry__preview {
         padding-right: 24px;
     }
@@ -664,6 +678,16 @@
         font-size: inherit; /* Prevent mobile browsers from auto-sizing truncated text */
     }
 
+    /* Without a preview, the type may use the preview column's space too,
+       so long types (e.g. sparse matrices) only ellipsize when truly cramped */
+    .anndata-entry__type:has(+ .anndata-entry__preview:empty) {
+        grid-column: span 2;
+    }
+
+    .anndata-entry__preview:empty {
+        display: none !important;
+    }
+
     .anndata-entry__type {
         font-family: var(
             --anndata-font-mono,
@@ -678,6 +702,8 @@
         color: var(--anndata-text-secondary, #6c757d);
         text-align: left;
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         padding: 6px 12px;
         align-self: center;
     }
@@ -1003,15 +1029,21 @@
         border-bottom: 1px solid var(--anndata-border-light, #e9ecef);
         color: var(--anndata-text-secondary, #6c757d);
 
+        /* Align the type with the entries' type column: row padding (12px) +
+           this width + gap (12px) = name column width + cell padding (12px) */
         > span:first-child {
             font-family: var(--anndata-font-mono);
             font-weight: 600;
-            min-width: 60px;
+            flex: 0 0 calc(var(--anndata-name-col-width, 150px) - 12px);
         }
 
         > span:last-child {
             font-family: var(--anndata-font-mono);
             font-size: 11px;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
     }
 

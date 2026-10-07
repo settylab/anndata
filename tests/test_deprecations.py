@@ -6,8 +6,6 @@ This includes correct behaviour as well as throwing warnings.
 
 from __future__ import annotations
 
-import warnings
-
 import h5py
 import numpy as np
 import pytest
@@ -26,6 +24,7 @@ def adata() -> AnnData:
         var=dict(var_names=["a", "b", "c"]),
     )
     adata.raw = adata.copy()
+    assert isinstance(adata.X, sparse.csr_matrix)
     adata.layers["x2"] = adata.X * 2
     adata.var["anno2"] = ["p1", "p2", "p3"]
     adata.X = adata.X / 2
@@ -37,30 +36,6 @@ def test_get_obsvar_array_warn(adata: AnnData) -> None:
         adata.obs_vector("a")
     with pytest.warns(FutureWarning):
         adata.var_vector("s1")
-
-
-# This should break in 0.9
-def test_dtype_warning():
-    # Tests a warning is thrown
-    with pytest.warns(FutureWarning):
-        a = AnnData(np.ones((3, 3)), dtype=np.float32)
-    assert a.X.dtype == np.float32
-
-    # This shouldn't warn, shouldn't copy
-    with warnings.catch_warnings(record=True) as record:
-        b_X = np.ones((3, 3), dtype=np.float64)
-        b = AnnData(b_X)
-        assert not record
-    assert b_X is b.X
-    assert b.X.dtype == np.float64
-
-    # Should warn, should copy
-    c_X = np.ones((3, 3), dtype=np.float32)
-    with pytest.warns(FutureWarning):
-        c = AnnData(c_X, dtype=np.float64)
-    assert not record
-    assert c_X is not c.X
-    assert c.X.dtype == np.float64
 
 
 def test_deprecated_write_attribute(tmp_path):
@@ -112,3 +87,14 @@ def test_warn_on_deprecated_extension_namespace():
 def test_keys_function_warns(adata: AnnData, name) -> None:
     with pytest.warns(FutureWarning, match=rf"{name}_keys is deprecated"):
         getattr(adata, f"{name}_keys")()
+
+
+def test_annloader_init_warns(adata: AnnData) -> None:
+    # We currently have no test env that has torch but I ran this locally.
+    pytest.importorskip("torch")
+    from anndata.experimental import AnnLoader
+
+    with pytest.warns(
+        FutureWarning, match=r"Use .*annbatch\.Loader.* instead of .*AnnLoader.*"
+    ):
+        AnnLoader(adata)

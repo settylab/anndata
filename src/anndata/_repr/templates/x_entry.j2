@@ -9,14 +9,16 @@
      and state="format_error"). Autoescaped.
 
    Trust contract: all inputs are plain str; Jinja autoescapes them. #}
-{% from '_macros.j2' import muted_error_span %}
+{% from '_macros.j2' import parenthesized_error %}
 <div class="anndata-x__entry">
 <span>{{ x_label }}</span>
 {%- if state == "ok" -%}
-<span class="{{ css_class }}">{{ type_name }}</span>
+<span class="{{ css_class }}" title="{{ type_name }}">{{ type_name }}</span>
 {%- elif state == "none" -%}
 <span><em>None</em></span>
+{%- elif state == "attribute_error" -%}
+{{ parenthesized_error(error_msg, CSS_TEXT_ERROR) }}
 {%- else -%}
-{{ muted_error_span(error_msg) }}
+{{ parenthesized_error(error_msg, CSS_TEXT_MUTED) }}
 {%- endif -%}
 </div>

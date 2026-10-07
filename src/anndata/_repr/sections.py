@@ -23,7 +23,13 @@ This ensures a partially-rendered repr is always better than a crashed cell.
 
 from __future__ import annotations
 
+import inspect
+import uuid
+import warnings
+from collections.abc import Mapping
 from dataclasses import replace
+from functools import cached_property
+from types import BuiltinFunctionType, FunctionType, MethodType
 from typing import TYPE_CHECKING
 
 from markupsafe import Markup
@@ -31,8 +37,8 @@ from markupsafe import Markup
 from .._repr_constants import (
     CSS_DTYPE_ANNDATA,
     CSS_DTYPE_UNKNOWN,
-    ERROR_TRUNCATE_LENGTH,
     INTERNAL_ANNDATA_ATTRS,
+    UNIQUE_COUNT_BUDGET,
 )
 from .._types import AnnDataElem
 from ..utils import get_literal_members
@@ -49,8 +55,12 @@ from .components import (
 )
 from .core import (
     get_section_tooltip,
+    pluralize,
+    render_details_section,
     render_empty_section,
+    render_error_section,
     render_formatted_entry,
+    render_index_preview,
     render_section,
     render_truncation_indicator,
     render_x_entry,
@@ -63,7 +73,6 @@ from .registry import (
     formatter_registry,
 )
 from .utils import (
-    format_index_preview,
     format_number,
 )
 
@@ -125,13 +134,18 @@ def _render_dataframe_section(
 
     # Doc URL and tooltip for this section
     doc_url = get_section_doc_url(section)
-    tooltip = "Observation annotations" if section == "obs" else "Variable annotations"
+    tooltip = get_section_tooltip(section)
 
     if n_cols == 0:
         return render_empty_section(section, doc_url, tooltip)
 
     # Set section for section-specific formatters (e.g., LazyColumnFormatter)
     section_context = replace(context, section=section)
+
+    # Unique counts cost ~10ms per column per million rows: only count the
+    # first columns until the total scanned values reach the budget.
+    n_rows = len(df)
+    n_unique_cols = UNIQUE_COUNT_BUDGET // n_rows if n_rows else n_cols
 
     # Render entries (with truncation)
     rows = []
@@ -141,6 +155,8 @@ def _render_dataframe_section(
             break
         col = df[col_name]
         col_context = replace(section_context, key=col_name)
+        if i >= n_unique_cols:
+            col_context = replace(col_context, unique_limit=0)
         output = formatter_registry.format_value(col, col_context)
         rows.append(_render_entry_row(col_name, output))
 
@@ -151,7 +167,7 @@ def _render_dataframe_section(
         doc_url=doc_url,
         tooltip=tooltip,
         should_collapse=n_cols > context.fold_threshold,
-        count_str=f"({n_cols} columns)",
+        count_str=f"({pluralize(n_cols, 'column')})",
     )
 
 
@@ -162,15 +178,18 @@ def _render_dataframe_section(
 
 def _render_mapping_section(
     section: str,
-    mapping: object,
+    mapping: Mapping[str | None, object],
     context: FormatterContext,
 ) -> Markup:
     """Render obsm, varm, layers, obsp, varp sections."""
     if mapping is None:
         return Markup("")
 
+    # `.X` is stored as `layers[None]`; it gets its own row, so hide it here
+    hide_x = section == "layers" and None in mapping
+
     # Get count without creating full list (O(1) for most mappings)
-    n_items = len(mapping)
+    n_items = len(mapping) - hide_x
 
     # Doc URL and tooltip for this section
     doc_url = get_section_doc_url(section)
@@ -184,7 +203,8 @@ def _render_mapping_section(
 
     # Render entries (with truncation) - iterate lazily, stop at max_items
     rows = []
-    for i, key in enumerate(mapping.keys()):
+    keys = (k for k in mapping if k is not None)
+    for i, key in enumerate(keys):
         if i >= context.max_items:
             rows.append(render_truncation_indicator(n_items - context.max_items))
             break
@@ -209,7 +229,7 @@ def _render_mapping_section(
 
 
 def _render_uns_section(
-    uns: object,
+    uns: Mapping[str, object],
     context: FormatterContext,
 ) -> Markup:
     """Render the uns section with special handling."""
@@ -218,7 +238,7 @@ def _render_uns_section(
 
     # Doc URL and tooltip
     doc_url = get_section_doc_url("uns")
-    tooltip = "Unstructured annotation"
+    tooltip = get_section_tooltip("uns")
 
     if n_items == 0:
         return render_empty_section("uns", doc_url, tooltip)
@@ -254,8 +274,9 @@ def _render_uns_entry(
     2. Unhandled type hint (show import suggestion)
     3. Default formatter
     """
-    # Pass key to context for key-based detection (e.g., color lists)
-    key_context = replace(context, key=key)
+    # Section and key for section-restricted formatters and key-based
+    # detection (e.g., color lists)
+    key_context = replace(context, section="uns", key=key)
 
     # 1. Try formatter first - handles type hints, color lists, AnnData
     output = formatter_registry.format_value(value, key_context)
@@ -288,10 +309,13 @@ def _render_uns_entry(
 def _detect_unknown_sections(adata: AnnData) -> list[tuple[str, str]]:
     """Detect mapping-like attributes not surfaced by the standard section list.
 
+    Methods are recognized statically and skipped, and a ``cached_property``
+    that has not been computed yet is skipped too, so detection does not
+    trigger expensive computations. Plain properties are evaluated (they are
+    expected to be cheap, like any attribute access).
+
     Returns list of (attr_name, type_description) tuples for unknown sections.
     """
-    from collections.abc import Mapping
-
     # See INTERNAL_ANNDATA_ATTRS docstring for why the internal list is explicit.
     known = set(get_literal_members(AnnDataElem)) | INTERNAL_ANNDATA_ATTRS
 
@@ -301,12 +325,22 @@ def _detect_unknown_sections(adata: AnnData) -> list[tuple[str, str]]:
 
     unknown = []
     for attr in dir(adata):
-        # Skip private, known, and callable attributes
         if attr.startswith("_") or attr in known:
             continue
 
         try:
-            val = getattr(adata, attr)
+            static = inspect.getattr_static(adata, attr)
+        except AttributeError:
+            continue  # only reachable via a dynamic __getattr__: not a data slot
+        if isinstance(static, _NON_DATA_TYPES):
+            continue
+
+        try:
+            # Probing must not surface warnings to the user, e.g. from
+            # deprecated properties (MuData's `mod_names`, AnnData's `isview`)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                val = getattr(adata, attr)
             # Check if it's a data container (mapping-like or has keys())
             if isinstance(val, Mapping) or (
                 hasattr(val, "keys")
@@ -316,8 +350,7 @@ def _detect_unknown_sections(adata: AnnData) -> list[tuple[str, str]]:
                 # Get type description
                 type_name = type(val).__name__
                 try:
-                    n_items = len(val)
-                    type_desc = f"{type_name} ({n_items} items)"
+                    type_desc = f"{type_name} ({pluralize(len(val), 'item')})"
                 except Exception:  # noqa: BLE001
                     type_desc = type_name
                 unknown.append((attr, type_desc))
@@ -326,6 +359,20 @@ def _detect_unknown_sections(adata: AnnData) -> list[tuple[str, str]]:
             unknown.append((attr, "inaccessible"))
 
     return unknown
+
+
+# Attributes that are statically known not to be data sections: methods, and
+# not-yet-computed cached properties (computing them could be expensive).
+# A computed ``cached_property`` lives in the instance ``__dict__``, so
+# ``inspect.getattr_static`` returns its value rather than the descriptor.
+_NON_DATA_TYPES = (
+    FunctionType,
+    BuiltinFunctionType,
+    MethodType,
+    staticmethod,
+    classmethod,
+    cached_property,
+)
 
 
 def _render_unknown_sections(unknown_sections: list[tuple[str, str]]) -> Markup:
@@ -344,26 +391,15 @@ def _render_unknown_sections(unknown_sections: list[tuple[str, str]]) -> Markup:
         for attr_name, type_desc in unknown_sections
     ]
 
-    n = len(unknown_sections)
-    return render_section(
+    return render_details_section(
+        "unknown",
         "other",
-        Markup("\n").join(rows),
-        n_items=n,
-        section_id="unknown",
-        count_str=f"({n})",
+        f"({len(unknown_sections)})",
+        Markup('<div class="anndata-section__entries">{}</div>').format(
+            Markup("\n").join(rows)
+        ),
+        is_open=False,
         extra_classes="anndata-sec-unknown",
-    )
-
-
-def _render_error_entry(section: str, error: str) -> Markup:
-    """Render an error indicator for a section that failed to render."""
-    error_str = str(error)
-    if len(error_str) > ERROR_TRUNCATE_LENGTH:
-        error_str = error_str[:ERROR_TRUNCATE_LENGTH] + "..."
-    return Markup(
-        get_env()
-        .get_template("error_entry.j2")
-        .render(section=section, error=error_str)
     )
 
 
@@ -410,12 +446,12 @@ def _get_raw_meta_parts(raw: object) -> list[str]:
     meta_parts = []
     try:
         if hasattr(raw, "var") and raw.var is not None and len(raw.var.columns) > 0:
-            meta_parts.append(f"var: {len(raw.var.columns)} cols")
+            meta_parts.append(f"var: {pluralize(len(raw.var.columns), 'column')}")
     except Exception:  # noqa: BLE001
         pass
     try:
         if hasattr(raw, "varm") and raw.varm is not None and len(raw.varm) > 0:
-            meta_parts.append(f"varm: {len(raw.varm)}")
+            meta_parts.append(f"varm: {pluralize(len(raw.varm), 'item')}")
     except Exception:  # noqa: BLE001
         pass
     return meta_parts
@@ -453,7 +489,7 @@ def _render_raw_section(
     meta_text = ", ".join(meta_parts) if meta_parts else ""
 
     # Single row with raw info
-    type_str = f"{format_number(n_obs)} obs × {format_number(n_vars)} var"
+    type_str = f"{format_number(n_obs)} obs × {format_number(n_vars)} vars"
     row_parts: list[Markup] = [
         render_entry_row_open("raw", "Raw", has_expandable_content=can_expand),
         render_name_cell("raw"),
@@ -476,17 +512,6 @@ def _render_raw_section(
     )
 
 
-def _safe_index_preview(raw: object, attr: str) -> Markup | None:
-    """Read ``raw.<attr>`` and return its format_index_preview Markup, or None."""
-    try:
-        names = getattr(raw, attr, None)
-    except Exception:  # noqa: BLE001
-        return None
-    if names is None:
-        return None
-    return format_index_preview(names)
-
-
 def _generate_raw_repr_html(
     raw,
     context: FormatterContext,
@@ -505,37 +530,38 @@ def _generate_raw_repr_html(
     """
     n_obs = _safe_get_attr(raw, "n_obs", "?")
     n_vars = _safe_get_attr(raw, "n_vars", "?")
-    shape_str = f"{format_number(n_obs)} obs × {format_number(n_vars)} var"
+    shape_str = f"{format_number(n_obs)} obs × {format_number(n_vars)} vars"
 
     sections: list[Markup] = []
+
+    # X section - show matrix info (with error handling)
     try:
         if hasattr(raw, "X") and raw.X is not None:
             sections.append(render_x_entry(raw, context))
     except Exception as e:  # noqa: BLE001
-        sections.append(_render_error_entry("X", str(e)))
+        sections.append(render_error_section("X", str(e)))
 
     try:
         if hasattr(raw, "var") and raw.var is not None and len(raw.var.columns) > 0:
             var_context = replace(context, adata_ref=None, section="var")
             sections.append(_render_dataframe_section("var", raw.var, var_context))
     except Exception as e:  # noqa: BLE001
-        sections.append(_render_error_entry("var", str(e)))
+        sections.append(render_error_section("var", str(e)))
 
     try:
         if hasattr(raw, "varm") and raw.varm is not None and len(raw.varm) > 0:
             varm_context = replace(context, adata_ref=None, section="varm")
             sections.append(_render_mapping_section("varm", raw.varm, varm_context))
     except Exception as e:  # noqa: BLE001
-        sections.append(_render_error_entry("varm", str(e)))
+        sections.append(render_error_section("varm", str(e)))
 
     return Markup(
         get_env()
         .get_template("raw_repr.j2")
         .render(
-            container_id=f"raw-repr-{id(raw)}",
+            container_id=f"anndata-raw-{uuid.uuid4().hex[:8]}",
             shape_str=shape_str,
-            obs_preview=_safe_index_preview(raw, "obs_names"),
-            var_preview=_safe_index_preview(raw, "var_names"),
+            index_preview=render_index_preview(raw),
             sections=sections,
         )
     )

@@ -38,7 +38,6 @@ exclude_patterns = [
     "Thumbs.db",
     ".DS_Store",
     "**.ipynb_checkpoints",
-    "tutorials/notebooks/*.rst",
     # exclude all 0.x.y.md files, but not index.md
     "release-notes/[!i]*.md",
     "news.md",  # is `include`d into index.md
@@ -60,6 +59,7 @@ extensions = [
     "sphinx_design",
     "sphinxext.opengraph",
     "scanpydoc",  # needs to be before linkcode
+    "scverse_misc.sphinx_ext",
     "sphinx.ext.linkcode",
     "IPython.sphinxext.ipython_console_highlighting",
     *(p.stem for p in _extension_dir.glob("*.py")),
@@ -93,6 +93,14 @@ todo_include_todos = False
 def setup(app: Sphinx) -> None:
     app.add_generic_role("small", partial(nodes.inline, classes=["small"]))
     app.add_generic_role("smaller", partial(nodes.inline, classes=["smaller"]))
+
+    # https://github.com/mkdocstrings/python/issues/339
+    from sphinx.domains import ObjType
+    from sphinx.domains.python import PythonDomain
+
+    PythonDomain.object_types.setdefault(
+        "typealias", ObjType("type alias", "type", "obj")
+    )
 
     # TODO: move to scanpydoc
     if TYPE_CHECKING:
@@ -131,16 +139,20 @@ intersphinx_mapping = dict(
     pandas=("https://pandas.pydata.org/pandas-docs/stable", None),
     python=("https://docs.python.org/3", None),
     scipy=("https://docs.scipy.org/doc/scipy", None),
+    scverse_misc=("https://scverse-misc.readthedocs.io/stable", None),
     sklearn=("https://scikit-learn.org/stable", None),
     xarray=("https://docs.xarray.dev/en/stable", None),
     zarr=("https://zarr.readthedocs.io/en/stable/", None),
     zarrs=("https://zarrs-python.readthedocs.io/en/stable/", None),
+    annbatch=("https://annbatch.readthedocs.io/en/stable/", None),
+    mudata=("https://mudata.readthedocs.io/stable/", None),
 )
 
 # Fix mis-documented types. Use `anndata.utils.set_module` for ours instead.
 qualname_overrides = {
     #### stdlib
     "types.EllipsisType": ("py:data", "Ellipsis"),
+    "PyCapsule": "types.CapsuleType",
     #### anndata
     **{
         f"anndata._core.aligned_mapping.{cls}{kind}": "collections.abc.Mapping"
@@ -149,12 +161,8 @@ qualname_overrides = {
     },
     # Can’t use `set_module` for `type`s. When moving out of .experimental, define in actual location.
     "anndata._types.StorageType": "anndata.experimental.StorageType",
-    # https://github.com/theislab/scanpydoc/issues/254
-    "anndata.typing.Index1D": "anndata.typing.Index1D",
-    "anndata.typing.Index": "anndata.typing.Index",
-    "anndata.typing.RWAble": "anndata.typing.RWAble",
-    "anndata.typing.AxisStorable": "anndata.typing.AxisStorable",
-    "anndata.typing.InMemoryArray": "anndata.typing.InMemoryArray",
+    #### zarr
+    "zarr.core.group.StoreLike": "zarr.storage.StoreLike",
     #### h5py
     "h5py._hl.group.Group": "h5py.Group",
     "h5py._hl.files.File": "h5py.File",
@@ -163,30 +171,33 @@ qualname_overrides = {
     "awkward.highlevel.Array": "ak.Array",
     "numpy.int64": ("py:attr", "numpy.int64"),
     "numpy.dtypes.StringDType": ("py:attr", "numpy.dtypes.StringDType"),
+    "numpy._typing._array_like.NDArray": ("py:data", "numpy.typing.NDArray"),
     "pandas.DataFrame.iloc": ("py:attr", "pandas.DataFrame.iloc"),
     "pandas.DataFrame.loc": ("py:attr", "pandas.DataFrame.loc"),
 }
 # Sphinx consults this {alias → name} mapping when rendering types
 # sphinx-autodoc-typehints uses when importing types to resolve them
-autodoc_type_aliases = dict()
+autodoc_type_aliases = dict(
+    Scalar=":py:type:`~pandas.api.typing.aliases.Scalar`",
+)
 # if nothing else helps, modify `nitpick_ignore`
 nitpicky = True  # Report broken links, this stays on
 nitpick_ignore = [  # APIs without an intersphinx entry
-    # These APIs aren’t actually documented
+    #### These APIs aren’t actually documented
     ("py:class", "anndata._core.raw.Raw"),
     ("py:class", "pandas.api.typing.NAType"),
     # TODO: remove zappy support; the zappy repo is archived
     ("py:class", "anndata.compat.ZappyArray"),
-    # this happens when a `type` or `class` is generic
-    ("py:class", "anndata.acc.GenericAlias"),
+    #### these happen when a `type` or `class` is generic
     ("py:obj", "typing.R"),
     ("py:class", "_M"),
+    ("py:class", "anndata.utils.Default"),
 ]
 
 # -- Social cards ---------------------------------------------------------
 
-ogp_site_url = "https://anndata.readthedocs.io/"
-ogp_image = "https://anndata.readthedocs.io/en/latest/_static/img/anndata_schema.svg"
+ogp_site_url = "https://anndata.scverse.org/"
+ogp_image = f"{ogp_site_url}page/_static/img/anndata_schema.svg"
 
 # -- Options for HTML output ----------------------------------------------
 

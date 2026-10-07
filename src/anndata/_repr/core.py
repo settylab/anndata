@@ -18,12 +18,16 @@ from markupsafe import Markup
 from .._repr_constants import (
     CSS_DTYPE_CATEGORY,
     CSS_DTYPE_DATAFRAME,
+    DEFAULT_PREVIEW_ITEMS,
+    ERROR_TRUNCATE_LENGTH,
 )
 from .environment import get_env, get_macros
 from .registry import formatter_registry
-from .utils import format_number
+from .utils import format_index_preview, format_number
 
 if TYPE_CHECKING:
+    from anndata import AnnData, Raw
+
     from .registry import FormattedEntry, FormatterContext
 
 
@@ -104,35 +108,135 @@ def render_section(  # noqa: PLR0913
             tooltip="Image data",
         )
     """
-    if section_id is None:
-        section_id = name
-    if count_str is None:
-        count_str = "(empty)" if n_items == 0 else f"({n_items} items)"
+    if n_items == 0:
+        return render_empty_section(
+            name, doc_url, tooltip, section_id=section_id, extra_classes=extra_classes
+        )
+    return render_details_section(
+        section_id or name,
+        name,
+        count_str or f"({pluralize(n_items, 'item')})",
+        Markup('<div class="anndata-section__entries">{}</div>').format(entries),
+        is_open=not should_collapse,
+        doc_url=doc_url,
+        tooltip=tooltip,
+        extra_classes=extra_classes,
+    )
 
+
+def render_details_section(  # noqa: PLR0913
+    section_id: str,
+    name: str,
+    count: str | Markup,
+    content: Markup,
+    *,
+    is_open: bool,
+    doc_url: str | None = None,
+    tooltip: str = "",
+    extra_classes: str = "",
+) -> Markup:
+    """Render a foldable section: a ``<details>`` with a summary header.
+
+    This is the single place that produces section markup; ``render_section``,
+    ``render_empty_section`` and the error/unknown-attribute sections use it.
+
+    Parameters
+    ----------
+    section_id
+        Value for the ``data-section`` attribute
+    name
+        Display name in the header
+    count
+        Count label next to the name, e.g. ``"(3 items)"``. Plain ``str`` is
+        escaped, ``Markup`` passes through.
+    content
+        Trusted section body HTML (``Markup``)
+    is_open
+        Whether the section starts expanded
+    doc_url
+        URL for the help link (? icon)
+    tooltip
+        Tooltip text for the help link
+    extra_classes
+        Additional CSS classes for the ``<details>`` element
+    """
     return Markup(
         get_env()
         .get_template("section.j2")
         .render(
+            section_id=section_id,
             name=name,
-            count_str=count_str,
+            count=count,
+            content=content,
+            is_open=is_open,
             doc_url=doc_url,
             tooltip=tooltip,
-            should_collapse=should_collapse,
-            section_id=section_id,
-            n_items=n_items,
-            entries=entries,
             extra_classes=extra_classes,
         )
     )
+
+
+def pluralize(n: int, noun: str) -> str:
+    """Format a count with a correctly pluralized noun, e.g. ``"1 item"``, ``"2 items"``."""
+    return f"{format_number(n)} {noun}{'' if n == 1 else 's'}"
 
 
 def render_empty_section(
     name: str,
     doc_url: str | None = None,
     tooltip: str = "",
+    *,
+    section_id: str | None = None,
+    extra_classes: str = "",
 ) -> Markup:
-    """Render an empty section indicator."""
-    return render_section(name, Markup(""), n_items=0, doc_url=doc_url, tooltip=tooltip)
+    """Render an empty (collapsed) section indicator."""
+    return render_details_section(
+        section_id or name,
+        name,
+        "(empty)",
+        Markup('<div class="anndata-section__empty">No entries</div>'),
+        is_open=False,
+        doc_url=doc_url,
+        tooltip=tooltip,
+        extra_classes=extra_classes,
+    )
+
+
+def render_error_section(section: str, error: str) -> Markup:
+    """Render an (expanded) error indicator for a section that failed to render."""
+    if len(error) > ERROR_TRUNCATE_LENGTH:
+        error = error[:ERROR_TRUNCATE_LENGTH] + "..."
+    return render_details_section(
+        section,
+        section,
+        Markup('<span class="anndata-badge--error">(error)</span>'),
+        Markup('<div class="anndata-entry--error">Failed to render: {}</div>').format(
+            error
+        ),
+        is_open=True,
+        extra_classes="anndata-sec-error",
+    )
+
+
+def render_index_preview(obj: object) -> Markup:
+    """Render a preview of ``obj.obs_names`` and ``obj.var_names``.
+
+    Works for AnnData, Raw and other objects; missing or broken indices are
+    shown as "not available".
+    """
+    previews = {}
+    for attr in ("obs_names", "var_names"):
+        try:
+            previews[attr] = format_index_preview(
+                getattr(obj, attr), DEFAULT_PREVIEW_ITEMS
+            )
+        except Exception:  # noqa: BLE001
+            previews[attr] = Markup("<em>not available</em>")
+    return Markup(
+        get_env()
+        .get_template("index_preview.j2")
+        .render(obs_preview=previews["obs_names"], var_preview=previews["var_names"])
+    )
 
 
 def render_truncation_indicator(remaining: int) -> Markup:
@@ -156,7 +260,7 @@ def get_section_tooltip(section: str) -> str:
     return tooltips.get(section, "")
 
 
-def render_x_entry(obj: object, context: FormatterContext) -> Markup:
+def render_x_entry(obj: AnnData | Raw, context: FormatterContext) -> Markup:
     """Render X as a single compact entry row.
 
     Works with AnnData, Raw, and any object with an X attribute.
@@ -171,7 +275,9 @@ def render_x_entry(obj: object, context: FormatterContext) -> Markup:
         X = obj.X
     except Exception as e:  # noqa: BLE001
         state = "attribute_error"
-        error_msg = f"error: {type(e).__name__}"
+        error_msg = f"error: {type(e).__name__}: {e}"
+        if len(error_msg) > ERROR_TRUNCATE_LENGTH:
+            error_msg = error_msg[:ERROR_TRUNCATE_LENGTH] + "..."
     else:
         if X is None:
             state = "none"
@@ -297,10 +403,12 @@ def render_formatted_entry(
         output.preview_markup
     )
 
+    # Error takes precedence over preview_markup, which takes precedence over
+    # preview
     preview_markup = output.preview_markup
     preview_text = output.preview
-    if output.error and not preview_markup:
-        preview_markup = Markup(get_macros().error_preview(output.error))
+    if output.error:
+        preview_markup = get_macros().error_preview(output.error)
 
     if preview_note and preview_text:
         preview_text = f"{preview_note} {preview_text}"

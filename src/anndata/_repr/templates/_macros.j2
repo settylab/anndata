@@ -146,18 +146,17 @@
 <span class="{{ CSS_TEXT_WARNING }}">{{ message }}</span>
 {%- endmacro -%}
 
-{# Muted error span: an italicised, parenthesised error shown in a muted
-   colour (used for attribute-access / format errors in the X entry and
-   similar compact rows). #}
-{%- macro muted_error_span(error_msg) -%}
-<span class="{{ CSS_TEXT_MUTED }}"><em>({{ error_msg }})</em></span>
+{# Parenthesised italic error shown in the X entry and similar compact rows.
+   `css_class` picks the colour (CSS_TEXT_ERROR or CSS_TEXT_MUTED). #}
+{%- macro parenthesized_error(error_msg, css_class) -%}
+<span class="{{ css_class }}"><em>({{ error_msg }})</em></span>
 {%- endmacro -%}
 
-{# DataFrame columns preview: "[col1, col2, ...]" list used in obsm/varm for
-   DataFrames. `columns` is a sequence of plain str values; Jinja autoescapes
-   each when rendered inside {{ … }}. #}
-{%- macro columns_preview(columns) -%}
-<span class="anndata-columns">[{{ columns|join(", ") }}]</span>
+{# DataFrame columns preview: "[col1, col2, …+N]" list used in obsm/varm for
+   DataFrames. `columns` is a sequence of plain str values and `hidden` an
+   optional pre-formatted count of omitted columns; Jinja autoescapes both. #}
+{%- macro columns_preview(columns, hidden=none) -%}
+<span class="anndata-columns">[{{ columns|join(", ") }}{% if hidden %}, …+{{ hidden }}{% endif %}]</span>
 {%- endmacro -%}
 
 {# Single color swatch. Caller has already run sanitize_css_color on the

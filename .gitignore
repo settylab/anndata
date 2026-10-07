@@ -8,6 +8,8 @@ __pycache__/
 /node_modules/
 /data/
 /venv/
+.venv/
+/uv.lock
 
 # Distribution / packaging
 /dist/
@@ -25,8 +27,9 @@ tests/repr_html_visual_test.html
 .ipynb_checkpoints
 
 # docs
-/docs/generated/
 /docs/_build/
+/docs/generated/*
+!/docs/generated/anndata.types.ExtensionNamespace.rst
 
 # IDEs
 /.idea/

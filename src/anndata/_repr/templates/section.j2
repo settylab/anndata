@@ -1,38 +1,16 @@
-{# One-size-fits-all section frame.
-   Non-empty sections get <details>/<summary> with the entries body.
-   Empty sections render a muted "No entries" placeholder.
-   All user-facing strings (name, count_str, tooltip) are autoescaped;
-   doc_url is autoescaped inside the href attribute.
-   `entries` is expected to be Markup (pre-rendered HTML).
-   `extra_classes` is an optional str of additional CSS classes
-   (e.g. "anndata-sec-unknown") appended to the root <details>.
-   `count_str` is emitted verbatim whether n_items is zero or not —
-   callers pick (empty), (N items), (N columns), ... as appropriate.
+{# Foldable section frame: <details> with a <summary> header and a content body.
+   `name`, `section_id`, `tooltip` and `doc_url` are plain str and autoescaped.
+   `count` is str (escaped) or Markup (verbatim), e.g. "(3 items)" or "(empty)".
+   `content` is Markup (pre-rendered body). `extra_classes` is an optional str
+   of additional CSS classes (e.g. "anndata-sec-unknown") on the root element.
 #}
-{%- macro section_header(name, count_str, doc_url, tooltip) -%}
-<summary>
-  <span class="anndata-section__name">{{ name }}</span>
-  <span class="anndata-section__count">{{ count_str }}</span>
-  {%- if doc_url %}
-  <a class="anndata-section__help" href="{{ doc_url }}" target="_blank" title="{{ tooltip }}">?</a>
-  {%- endif %}
-</summary>
-{%- endmacro -%}
-{%- set root_class = 'anndata-section' ~ (' ' ~ extra_classes if extra_classes else '') -%}
-{%- if n_items == 0 -%}
-<details class="{{ root_class }}" data-section="{{ section_id }}">
-  {{ section_header(name, count_str, doc_url, tooltip) }}
-  <div class="anndata-section__content">
-    <div class="anndata-section__empty">No entries</div>
-  </div>
+<details class="anndata-section{% if extra_classes %} {{ extra_classes }}{% endif %}" data-section="{{ section_id }}"{% if is_open %} open{% endif %}>
+  <summary>
+    <span class="anndata-section__name">{{ name }}</span>
+    <span class="anndata-section__count">{{ count }}</span>
+    {%- if doc_url %}
+    <a class="anndata-section__help" href="{{ doc_url }}" target="_blank" title="{{ tooltip }}">?</a>
+    {%- endif %}
+  </summary>
+  <div class="anndata-section__content">{{ content }}</div>
 </details>
-{%- else -%}
-<details class="{{ root_class }}" data-section="{{ section_id }}"{% if not should_collapse %} open{% endif %}>
-  {{ section_header(name, count_str, doc_url, tooltip) }}
-  <div class="anndata-section__content">
-    <div class="anndata-section__entries">
-      {{ entries }}
-    </div>
-  </div>
-</details>
-{%- endif -%}
